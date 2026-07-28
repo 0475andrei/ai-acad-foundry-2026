@@ -269,7 +269,10 @@ def ingest(req: IngestRequest) -> IngestResponse:
         store.ensure_collection(dim)
     except DimensionMismatch as e:
         raise HTTPException(status_code=409, detail=str(e))
-    ids = store.upsert(pieces, vectors, p["strategy"], req.source)
+    ids = store.upsert(
+        pieces, vectors, p["strategy"], req.source,
+        metadata=req.metadata.model_dump(exclude_none=True) if req.metadata else None,
+    )
     return IngestResponse(
         strategy=p["strategy"], count=len(pieces), vector_dimension=dim,
         embedding_preview=[round(x, 5) for x in vectors[0][:8]],

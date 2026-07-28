@@ -40,6 +40,14 @@ class ChunkResponse(BaseModel):
     count: int
     chunks: list[ChunkInfo]
 
+class DocumentMetadata(BaseModel):
+    """Document-level fields carried from the corpus front matter into every
+    chunk's payload, so retrieval can display/filter by them later (Part 5)."""
+    title: Optional[str] = None
+    product: Optional[str] = None
+    audience: Optional[str] = None
+    effective: Optional[str] = None
+    version: Optional[str] = None
 
 # --- ingestion ----------------------------------------------------------------
 class IngestRequest(ChunkRequest):
@@ -52,6 +60,10 @@ class IngestRequest(ChunkRequest):
     }]}}
 
     source: Optional[str] = Field(None, description="Label stored with every chunk (e.g. 'cards-faq')")
+    metadata: Optional[DocumentMetadata] = Field(
+        None, description="Document-level metadata (title/product/audience/effective/version) "
+                          "stored on every chunk from this document"
+    )
 
 
 class IngestResponse(BaseModel):
@@ -82,6 +94,7 @@ class SearchHit(BaseModel):
     strategy: Optional[str] = None
     source: Optional[str] = None
     id: str
+    metadata: Optional[DocumentMetadata] = None
 
 
 class SearchResponse(BaseModel):

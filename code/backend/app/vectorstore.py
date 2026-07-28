@@ -14,6 +14,11 @@ from qdrant_client import QdrantClient, models
 
 from .config import settings
 
+# Chunk payload keys that hold document-level metadata (not chunk-level facts
+# like "index" or "strategy"). Kept as a constant so upsert() and search()
+# never drift out of sync on what counts as metadata.
+_METADATA_KEYS = ("title", "product", "audience", "effective", "version")
+
 
 class DimensionMismatch(Exception):
     def __init__(self, existing: int, incoming: int) -> None:
@@ -49,10 +54,28 @@ class VectorStore:
             return True
         return False
 
+    # --- ids -------------------------------------------------------------------
+    @staticmethod
+    def _stable_id(source: str | None, index: int) -> str:
+        """Deterministic id derived from source + chunk index.
+
+        IMPROVEMENT #1 (stable chunk ids): previously every upsert minted a
+        fresh uuid4, so re-ingesting the same document duplicated its chunks
+        instead of replacing them. Qdrant's upsert() is keyed by id, so a
+        deterministic id (same source + same index -> same id) makes
+        re-ingestion idempotent: the old chunk at that position is overwritten
+        in place. Note this doesn't clean up *extra* leftover chunks if a new
+        version of a document produces fewer chunks than before â€” that's a
+        follow-up, not solved here.
+        """
+        key = f"{source or 'adhoc'}:{index}"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, key))
+
     # --- data ----------------------------------------------------------------
     def upsert(self, chunks: list[str], vectors: list[list[float]], strategy: str,
-               source: str | None) -> list[str]:
-        ids = [str(uuid.uuid4()) for _ in chunks]
+               source: str | None, metadata: dict | None = None) -> list[str]:
+        # IMPROVEMENT #1: stable ids instead of uuid.uuid4() per call.
+        ids = [self._stable_id(source, i) for i in range(len(chunks))]
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         self.client.upsert(
             collection_name=self.collection,
@@ -66,6 +89,11 @@ class VectorStore:
                         "strategy": strategy,
                         "source": source or "adhoc",
                         "ingested_at": now,
+                        # IMPROVEMENT #2: document-level metadata (title,
+                        # product, audience, effective, version) spread into
+                        # every chunk's payload so it can be shown and,
+                        # later, filtered on (Part 5).
+                        **(metadata or {}),
                     },
                 )
                 for i, (pid, text, vec) in enumerate(zip(ids, chunks, vectors))
@@ -77,17 +105,21 @@ class VectorStore:
         hits = self.client.query_points(
             collection_name=self.collection, query=vector, limit=top_k, with_payload=True
         ).points
-        return [
-            {
+        results = []
+        for h in hits:
+            payload = h.payload or {}
+            meta = {k: payload[k] for k in _METADATA_KEYS if payload.get(k) is not None}
+            results.append({
                 "id": str(h.id),
                 "score": round(float(h.score), 4),
-                "text": (h.payload or {}).get("text", ""),
-                "index": (h.payload or {}).get("index"),
-                "strategy": (h.payload or {}).get("strategy"),
-                "source": (h.payload or {}).get("source"),
-            }
-            for h in hits
-        ]
+                "text": payload.get("text", ""),
+                "index": payload.get("index"),
+                "strategy": payload.get("strategy"),
+                "source": payload.get("source"),
+                # IMPROVEMENT #2: surface metadata on every search hit.
+                "metadata": meta or None,
+            })
+        return results
 
     # --- introspection --------------------------------------------------------
     def info(self) -> dict:
