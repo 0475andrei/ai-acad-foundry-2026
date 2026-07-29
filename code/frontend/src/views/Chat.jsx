@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { Err, RunsOnBadge } from '../components'
+import { Err, RunsOnBadge, SpeakButton, MicButton } from '../components'
 
 export default function Chat({ agents, hostedOnly = [], foundry }) {
   const [messages, setMessages] = useState([])
   const [question, setQuestion] = useState('')
   const [agent, setAgent] = useState('default')
   const [useRag, setUseRag] = useState(true)
+  const [factCheck, setFactCheck] = useState(false)
   const [mode, setMode] = useState('local')
   const [topK, setTopK] = useState(3)
   const [busy, setBusy] = useState(false)
@@ -21,7 +22,8 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
     setQuestion(''); setError(null); setBusy(true)
     setMessages((m) => [...m, { role: 'user', text }])
     try {
-      const data = await api.ask({ question: text, use_rag: useRag, top_k: Number(topK), agent, agent_mode: mode })
+      const data = await api.ask({ question: text, use_rag: useRag, top_k: Number(topK),
+                                  agent, agent_mode: mode, fact_check: factCheck })
       setMessages((m) => [...m, { role: 'bot', data }])
     } catch (e) {
       setMessages((m) => [...m, { role: 'err', text: e.message }])
@@ -32,16 +34,25 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
   const all = [...agents, ...hostedOnly]
   const current = all.find((a) => a.name === agent)
 
-  // Where this agent CAN run decides which lanes are offered.
-  const hostedKnown = foundry?.available
+  // Three states, not two. `available === false` is not "we don't know" — it is a
+  // definite no: the Agent Service cannot be reached from here at all, whichever agent
+  // you pick, because a key was used where Entra is required. Offering the lane anyway
+  // is how you get a 503 in the chat window instead of a greyed-out option.
+  const foundryReachable = foundry?.available                 // true | false | undefined
   const isHosted = current?.runs_on === 'both' || current?.runs_on === 'foundry'
   const localImpossible = current?.runs_on === 'foundry'      // no JSON file to run here
-  const foundryBlocked = hostedKnown && !isHosted             // definitely not deployed
+  const foundryBlocked =
+    foundryReachable === false ||                             // no identity — nothing can
+    (foundryReachable === true && !isHosted)                  // reachable, but not deployed
+  const foundryWhy =
+    foundryReachable === false
+      ? (foundry?.reason || 'The Agent Service cannot be reached from here.')
+      : 'Not deployed to Foundry — deploy it from the Agents view'
 
   // Keep the mode legal whenever the selected agent changes.
   useEffect(() => {
-    if (localImpossible && mode !== 'foundry') setMode('foundry')
-    else if (foundryBlocked && mode === 'foundry') setMode('local')
+    if (foundryBlocked && mode === 'foundry') setMode('local')
+    else if (localImpossible && mode !== 'foundry') setMode('foundry')
   }, [agent, localImpossible, foundryBlocked])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -56,9 +67,14 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
           )}
         </select>
         {current && <RunsOnBadge runsOn={current.runs_on} reason={foundry?.reason} />}
-        <label className="check" style={{ margin: 0 }}>
+        <label className="check" style={{ margin: 0 }} title="Retrieve from your documents and ground the answer">
           <input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} />
           use RAG
+        </label>
+        <label className="check" style={{ margin: 0 }}
+               title="After answering, verify the answer against the open web and attach a verdict">
+          <input type="checkbox" checked={factCheck} onChange={(e) => setFactCheck(e.target.checked)} />
+          fact-check
         </label>
         <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ minWidth: '9rem' }}
                 title="Where the loop executes">
@@ -66,13 +82,18 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
                   title={localImpossible ? 'This agent has no local JSON file' : ''}>
             local agent
           </option>
-          <option value="foundry" disabled={foundryBlocked}
-                  title={foundryBlocked ? 'Not deployed to Foundry — deploy it from the Agents view' : ''}>
-            Foundry agent{foundryBlocked ? ' — not deployed' : ''}
+          <option value="foundry" disabled={foundryBlocked} title={foundryBlocked ? foundryWhy : ''}>
+            Foundry agent{foundryReachable === false ? ' — no identity'
+                          : foundryBlocked ? ' — not deployed' : ''}
           </option>
         </select>
         <input type="number" min="1" max="10" value={topK} onChange={(e) => setTopK(e.target.value)}
                style={{ width: '4.5rem', flex: '0 0 auto' }} title="Passages to retrieve" />
+        {foundryReachable === false && (
+          <span className="badge muted" title={foundryWhy}>
+            hosted agents off — key auth
+          </span>
+        )}
         <button className="btn btn-outline btn-sm" onClick={() => setMessages([])}>clear</button>
         {current && <span className="badge muted" title={current.description}>temp {current.temperature ?? '—'}</span>}
       </div>
@@ -100,8 +121,33 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
                 <span className={`badge ${d.augmented ? 'gold' : 'muted'}`}>{d.augmented ? 'grounded' : 'no retrieval'}</span>
                 <span className="badge muted">{d.agent?.mode}</span>
                 <span className="badge muted">{d.model}</span>
-                {d.usage && <span className="badge muted">{d.usage.prompt_tokens}↑ {d.usage.completion_tokens}↓ tokens</span>}
+                {d.usage && <span className="badge muted">{d.usage.prompt_tokens} {d.usage.completion_tokens} tokens</span>}
+                <SpeakButton text={d.answer} />
               </div>
+              {d.fact_check && (
+                <div className="src" style={{ marginTop: '.55rem',
+                     borderLeftColor: d.fact_check.verdict === 'supported' ? 'var(--c-teal)'
+                       : d.fact_check.verdict === 'contradicted' ? 'var(--c-crimson)' : 'var(--c-gold)' }}>
+                  <span className={`badge ${d.fact_check.verdict === 'contradicted' ? 'crimson'
+                    : d.fact_check.verdict === 'supported' ? '' : 'gold'}`}>
+                    fact-check: {d.fact_check.verdict}
+                  </span>{' '}
+                  <span className="faint">{d.fact_check.confidence} confidence · {d.fact_check.evidence_from}</span>
+                  {d.fact_check.error
+                    ? <div className="faint" style={{ marginTop: '.3rem' }}>{d.fact_check.error}</div>
+                    : <div style={{ marginTop: '.3rem' }}>{d.fact_check.reasoning}</div>}
+                  {d.fact_check.sources?.length > 0 && (
+                    <ul className="faint" style={{ margin: '.35rem 0 0', paddingLeft: '1.1rem' }}>
+                      {d.fact_check.sources.map((sc) => (
+                        <li key={sc.rank}>
+                          <a href={sc.url} target="_blank" rel="noreferrer">{sc.title || sc.url}</a>
+                          {' '}{sc.used ? `(${sc.chars_read} chars read)` : '(could not be read)'}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {d.retrieved?.length > 0 && (
                 <details className="sources">
                   <summary>{d.retrieved.length} retrieved passage{d.retrieved.length > 1 ? 's' : ''}</summary>
@@ -126,9 +172,10 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
 
       <Err error={error} />
       <div className="composer">
-        <textarea value={question} placeholder="Ask Libra Assist…  (Enter to send, Shift+Enter for a new line)"
+        <textarea value={question} placeholder={"Ask Libra Assist\u2026  (Enter to send, Shift+Enter for a new line)"}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+        <MicButton onText={(t) => setQuestion((q) => (q ? `${q} ${t}` : t))} disabled={busy} />
         <button className="btn btn-primary" onClick={send} disabled={busy || !question.trim()}>Send</button>
       </div>
     </div>

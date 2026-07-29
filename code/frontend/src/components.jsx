@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { api } from './api'
+import { startRecording } from './speech'
+
 
 export function Head({ title, children }) {
   return (
@@ -81,5 +84,73 @@ export function Hits({ hits }) {
         ))}
       </tbody>
     </table>
+  )
+}
+
+export function SpeakButton({ text }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function play() {
+    setError(null); setBusy(true)
+    try {
+      const blob = await api.speak({ text })
+      const url = URL.createObjectURL(blob)
+      const audio = new Audio(url)
+      audio.onended = () => URL.revokeObjectURL(url)
+      await audio.play()
+    } catch (e) {
+      setError(e.message)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+      <button className="btn btn-outline btn-sm" onClick={play} disabled={busy}
+              title="Listen to this answer (Azure AI Speech)">
+        {busy ? <span className="spin" /> : '\u{1F50A}'} listen
+      </button>
+      {error && <span className="faint" style={{ color: 'var(--c-crimson)' }}>{error}</span>}
+    </span>
+  )
+}
+
+export function MicButton({ onText, disabled }) {
+  const [recording, setRecording] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const controllerRef = useRef(null)
+
+  async function toggle() {
+    setError(null)
+    if (!recording) {
+      try {
+        controllerRef.current = await startRecording()
+        setRecording(true)
+      } catch (e) {
+        setError(e.message || 'Microphone access denied')
+      }
+      return
+    }
+    setRecording(false); setBusy(true)
+    try {
+      const wavBlob = await controllerRef.current.stop()
+      const file = new File([wavBlob], 'clip.wav', { type: 'audio/wav' })
+      const result = await api.transcribe(file)
+      onText(result.text)
+    } catch (e) {
+      setError(e.message)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+      <button type="button" className={`btn btn-sm ${recording ? 'btn-primary' : 'btn-outline'}`}
+              onClick={toggle} disabled={disabled || busy}
+              title={recording ? 'Stop recording' : 'Ask by voice (Azure AI Speech)'}>
+        {busy ? <span className="spin" /> : recording ? '\u25CF' : '\u{1F3A4}'} {recording ? 'stop' : 'speak'}
+      </button>
+      {error && <span className="faint" style={{ color: 'var(--c-crimson)' }}>{error}</span>}
+    </span>
   )
 }
