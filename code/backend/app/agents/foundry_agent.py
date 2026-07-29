@@ -252,6 +252,7 @@ def run(
     question: str,
     chunks: list[dict] | None = None,
     agent_id: str | None = None,
+    history: list[dict] | None = None,
 ) -> AgentReply:
     """Invoke the hosted agent for this persona.
 
@@ -267,18 +268,26 @@ def run(
             f"Deploy it first — POST /agents/{persona.name}/deploy, or "
             f"`python scripts/deploy_agent.py {persona.name}`."
         )
-    return _run_thread(agent_id, persona.name, question, chunks or [])
+    return _run_thread(agent_id, persona.name, question, chunks or [], history or [])
 
 
-def run_hosted(agent: dict, question: str, chunks: list[dict] | None = None) -> AgentReply:
+def run_hosted(agent: dict, question: str, chunks: list[dict] | None = None,
+               history: list[dict] | None = None) -> AgentReply:
     """Invoke a hosted agent that has no local persona file — its instructions
     live in Foundry, so there is nothing to compose on our side."""
-    return _run_thread(agent["agent_id"], agent["name"], question, chunks or [])
+    return _run_thread(agent["agent_id"], agent["name"], question, chunks or [], history or [])
 
 
-def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[dict]) -> AgentReply:
-    """The Agent Service protocol, in four calls."""
-    user = build_user_prompt(question, chunks)
+def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[dict],
+                 history: list[dict] | None = None) -> AgentReply:
+    """The Agent Service protocol, in four calls.
+
+    We open a fresh thread per call rather than keeping one alive across turns —
+    the Assistants-style API only accepts role="user" on client-added messages,
+    so there is nowhere to post prior assistant replies anyway. Continuity comes
+    from folding `history` into the prompt text instead, same as the local agent.
+    """
+    user = build_user_prompt(question, chunks, history)
 
     thread = _call("POST", "threads", {})                                    # 1 open
     thread_id = thread["id"]

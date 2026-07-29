@@ -106,6 +106,11 @@ class SearchResponse(BaseModel):
 
 
 # --- generation ---------------------------------------------------------------
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class AskRequest(BaseModel):
     model_config = {"json_schema_extra": {"examples": [{
         "question": "What fee does Libra Bank charge for early mortgage repayment?",
@@ -115,6 +120,12 @@ class AskRequest(BaseModel):
     }]}}
 
     question: str = Field(..., min_length=1)
+    history: list[ChatTurn] = Field(
+        default_factory=list,
+        description="Prior turns in this conversation, oldest first — user and assistant "
+                    "only, no system messages. The backend is stateless, so the frontend "
+                    "resends this on every call; only the most recent 20 turns are used.",
+    )
     use_rag: bool = Field(True, description="false = plain LLM; true = retrieve then augment")
     top_k: Optional[int] = Field(None, ge=1, le=50)
     temperature: Optional[float] = Field(None, ge=0, le=2)
