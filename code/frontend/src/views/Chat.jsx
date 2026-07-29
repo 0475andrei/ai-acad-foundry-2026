@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { Err, RunsOnBadge } from '../components'
+import { Err, RunsOnBadge, SpeakButton, MicButton } from '../components'
 
 export default function Chat({ agents, hostedOnly = [], foundry }) {
   const [messages, setMessages] = useState([])
@@ -121,7 +121,8 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
                 <span className={`badge ${d.augmented ? 'gold' : 'muted'}`}>{d.augmented ? 'grounded' : 'no retrieval'}</span>
                 <span className="badge muted">{d.agent?.mode}</span>
                 <span className="badge muted">{d.model}</span>
-                {d.usage && <span className="badge muted">{d.usage.prompt_tokens}↑ {d.usage.completion_tokens}↓ tokens</span>}
+                {d.usage && <span className="badge muted">{d.usage.prompt_tokens} {d.usage.completion_tokens} tokens</span>}
+                <SpeakButton text={d.answer} />
               </div>
               {d.fact_check && (
                 <div className="src" style={{ marginTop: '.55rem',
@@ -171,9 +172,10 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
 
       <Err error={error} />
       <div className="composer">
-        <textarea value={question} placeholder="Ask Libra Assist…  (Enter to send, Shift+Enter for a new line)"
+        <textarea value={question} placeholder={"Ask Libra Assist\u2026  (Enter to send, Shift+Enter for a new line)"}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
+        <MicButton onText={(t) => setQuestion((q) => (q ? `${q} ${t}` : t))} disabled={busy} />
         <button className="btn btn-primary" onClick={send} disabled={busy || !question.trim()}>Send</button>
       </div>
     </div>
