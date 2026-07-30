@@ -83,7 +83,7 @@ export default function App() {
                               onSelect={convo.setActiveId} onNew={convo.startNew}
                               onImportClick={convo.importClick} fileInputRef={convo.fileInputRef}
                               onImportFile={convo.importFile} onExport={exportConversation}
-                              onDelete={convo.deleteConversation} />
+                              onDelete={convo.deleteConversation} onRename={convo.renameConversation} />
           </div>
         )}
         <div className="side-foot">

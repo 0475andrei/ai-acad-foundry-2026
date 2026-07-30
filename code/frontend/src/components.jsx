@@ -69,7 +69,23 @@ export function RunsOnBadge({ runsOn, reason }) {
  * inside the Chat view for admins, or inside the app's own left rail for the
  * single-agent "user" role — same list, two different homes depending on isAdmin. */
 export function ConversationList({ conversations, activeId, onSelect, onNew, onImportClick,
-                                    fileInputRef, onImportFile, onExport, onDelete }) {
+                                    fileInputRef, onImportFile, onExport, onDelete, onRename }) {
+  const [editingId, setEditingId] = useState(null)
+  const [draft, setDraft] = useState('')
+  // Escape must not save. Removing the input on keydown lets the browser fire blur
+  // on an element that's already gone, which is unreliable — so both keys resolve
+  // through the same onBlur, and this flag is the one thing that tells it which way.
+  const cancelRef = useRef(false)
+
+  function startRename(c) {
+    setEditingId(c.id)
+    setDraft(c.title)
+  }
+  function commitRename() {
+    if (cancelRef.current) { cancelRef.current = false } else if (editingId) { onRename(editingId, draft) }
+    setEditingId(null)
+  }
+
   return (
     <>
       <div style={{ display: 'flex', gap: '.4rem', marginBottom: '.6rem' }}>
@@ -86,20 +102,40 @@ export function ConversationList({ conversations, activeId, onSelect, onNew, onI
       {conversations
         .slice()
         .sort((a, b) => b.createdAt - a.createdAt)
-        .map((c) => (
-          <div key={c.id} className={`convo-item ${c.id === activeId ? 'active' : ''}`}
-               onClick={() => onSelect(c.id)}>
-            <span className="convo-title" title={c.title}>{c.title}</span>
-            <button className="convo-export" title="Export this chat as JSON"
-                    onClick={(e) => { e.stopPropagation(); onExport(c) }}>
-              ↓
-            </button>
-            <button className="convo-del" title="Delete this chat"
-                    onClick={(e) => { e.stopPropagation(); onDelete(c.id) }}>
-              ×
-            </button>
-          </div>
-        ))}
+        .map((c) => {
+          const editing = c.id === editingId
+          return (
+            <div key={c.id} className={`convo-item ${c.id === activeId ? 'active' : ''}`}
+                 onClick={() => !editing && onSelect(c.id)}>
+              {editing ? (
+                <input className="convo-rename-input" autoFocus value={draft}
+                       onClick={(e) => e.stopPropagation()}
+                       onChange={(e) => setDraft(e.target.value)}
+                       onBlur={commitRename}
+                       onKeyDown={(e) => {
+                         if (e.key === 'Enter') { e.preventDefault(); e.target.blur() }
+                         if (e.key === 'Escape') { e.preventDefault(); cancelRef.current = true; e.target.blur() }
+                       }} />
+              ) : (
+                <span className="convo-title" title={c.title}>{c.title}</span>
+              )}
+              {!editing && (
+                <button className="convo-rename" title="Rename this chat"
+                        onClick={(e) => { e.stopPropagation(); startRename(c) }}>
+                  ✎
+                </button>
+              )}
+              <button className="convo-export" title="Export this chat as JSON"
+                      onClick={(e) => { e.stopPropagation(); onExport(c) }}>
+                ↓
+              </button>
+              <button className="convo-del" title="Delete this chat"
+                      onClick={(e) => { e.stopPropagation(); onDelete(c.id) }}>
+                ×
+              </button>
+            </div>
+          )
+        })}
     </>
   )
 }

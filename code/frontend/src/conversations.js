@@ -128,6 +128,12 @@ export function useConversationManager() {
     })
   }, [])
 
+  const renameConversation = useCallback((id, title) => {
+    const clean = title.trim()
+    if (!clean) return
+    setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, title: clean } : c)))
+  }, [])
+
   const fileInputRef = useRef(null)
   const importClick = useCallback(() => fileInputRef.current?.click(), [])
   const [importError, setImportError] = useState(null)
@@ -147,7 +153,7 @@ export function useConversationManager() {
 
   return {
     conversations, activeId, setActiveId, active,
-    updateActive, setMessages, startNew, deleteConversation,
+    updateActive, setMessages, startNew, deleteConversation, renameConversation,
     fileInputRef, importClick, importFile, importError,
   }
 }

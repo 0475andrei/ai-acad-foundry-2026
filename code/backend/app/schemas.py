@@ -345,6 +345,20 @@ class TranscribeResponse(BaseModel):
     language: Optional[str] = None
 
 
+class SuggestRequest(BaseModel):
+    model_config = {"json_schema_extra": {"examples": [{
+        "draft": "wat fee mortgage early repay",
+    }]}}
+
+    draft: str = Field(..., min_length=1, max_length=2000, description="The composer's current, possibly rough, text")
+
+
+class SuggestResponse(BaseModel):
+    suggestion: Optional[str] = Field(None, description="A cleaned-up rewrite, or null if the draft needs none")
+    provider: str
+    model: str
+
+
 # --- ops ----------------------------------------------------------------------
 class CollectionInfo(BaseModel):
     exists: bool

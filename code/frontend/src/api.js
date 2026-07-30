@@ -30,6 +30,7 @@ export const api = {
 
   search: (payload) => request('/search', { method: 'POST', body: payload }),
   ask: (payload) => request('/ask', { method: 'POST', body: payload }),
+  suggest: (payload) => request('/tools/suggest', { method: 'POST', body: payload }),
 
   agents: () => request('/agents'),
   agent: (name) => request(`/agents/${encodeURIComponent(name)}`),

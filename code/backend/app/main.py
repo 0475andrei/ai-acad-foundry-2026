@@ -20,8 +20,8 @@ from .schemas import (
     AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, FoundryAvailability,
     Health, HostedAgent, IngestRequest, IngestResponse, PersonaSummary, ScrapeRequest,
     ScrapeResponse, SearchHit, SearchRequest, SearchResponse, SpeakRequest,
-    TranscribeResponse, Usage, WebSearchHit, WebSearchRequest, WebSearchResponse,
-    AzureSearchQueryRequest, AzureSearchSyncRequest,
+    SuggestRequest, SuggestResponse, TranscribeResponse, Usage, WebSearchHit, WebSearchRequest,
+    WebSearchResponse, AzureSearchQueryRequest, AzureSearchSyncRequest,
 )
 from .services import aisearch, speech, web
 from .vectorstore import DimensionMismatch, VectorStore
@@ -518,6 +518,41 @@ def agent_deploy(name: str) -> dict:
 
 
 # --- tools / specialist services ----------------------------------------------
+_SUGGEST_SYSTEM = (
+    "You clean up rough chat drafts before they are sent to a banking assistant. Rewrite the "
+    "draft as a single, clear, well-formed question or request — same language, same intent, "
+    "no new facts or questions invented. Reply with the rewrite alone, no quotes, no preamble. "
+    "If the draft is already clear, or too short or ambiguous to safely rewrite, "
+    "reply with exactly: NONE"
+)
+
+
+@app.post("/tools/suggest", response_model=SuggestResponse, tags=["6 · tools"])
+def suggest(req: SuggestRequest) -> SuggestResponse:
+    """The "did you mean" popup above the composer: one small, fast model call that
+    turns a rough draft into a clean question, or says NONE when there is nothing
+    worth changing. Same provider/model as /ask — whatever LLM_PROVIDER points at."""
+    draft = req.draft.strip()
+    llm = get_llm()
+    if len(draft) < 8:
+        return SuggestResponse(suggestion=None, provider=llm.provider, model=llm.model)
+    # Reasoning models (the gpt-5 family — e.g. gpt-5-mini) spend part of max_tokens
+    # thinking before they write a word of visible output. Without a cap on that, a
+    # short rewrite like this one can burn the whole budget on hidden reasoning and
+    # come back with an empty answer — silently, since that just looks like "no
+    # suggestion needed". Capping effort here is what keeps output tokens available.
+    extras = {"reasoning_effort": "minimal"} if "gpt-5" in llm.model.lower() else {}
+    try:
+        result = llm.chat(system=_SUGGEST_SYSTEM, user=draft, temperature=0.2,
+                          max_tokens=300, extras=extras)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Suggestion failed: {e}")
+    text = result.text.strip().strip('"')
+    same = text.strip().lower().rstrip(".?!") == draft.lower().rstrip(".?!")
+    suggestion = None if not text or text.upper() == "NONE" or same else text
+    return SuggestResponse(suggestion=suggestion, provider=result.provider, model=result.model)
+
+
 @app.post("/tools/web-fetch", response_model=ScrapeResponse, tags=["6 · tools"])
 def web_fetch(req: ScrapeRequest) -> ScrapeResponse:
     """Fetch a page and strip it to text — **the do-it-yourself lane**.

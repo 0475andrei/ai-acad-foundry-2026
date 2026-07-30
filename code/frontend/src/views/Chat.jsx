@@ -8,9 +8,15 @@ import { titleFrom, exportConversation } from '../conversations'
 const USER_DEFAULT_AGENT = 'andrei-dobrin-agent'
 const USER_DEFAULT_MODE = 'foundry'
 
+// Below this length there isn't enough draft for the model to guess intent from —
+// skip the call rather than asking it to rewrite three words.
+const SUGGEST_MIN_CHARS = 12
+const SUGGEST_DEBOUNCE_MS = 900
+
 export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true, convo }) {
   const { conversations, activeId, setActiveId, active, updateActive, setMessages,
-          startNew, deleteConversation, fileInputRef, importClick, importFile, importError } = convo
+          startNew, deleteConversation, renameConversation, fileInputRef, importClick,
+          importFile, importError } = convo
   const messages = active.messages
 
   const [question, setQuestion] = useState('')
@@ -23,6 +29,32 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
   const endRef = useRef(null)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, busy])
+
+  // "Did you mean…" — a debounced call to the same chat model, asking it to clean
+  // up whatever is currently in the box. Any keystroke invalidates the last
+  // suggestion (it was made for different text), so it's cleared up front; the
+  // sequence ref drops a response that arrives after the draft has moved on.
+  const [suggestion, setSuggestion] = useState(null)
+  const suggestSeq = useRef(0)
+  useEffect(() => {
+    setSuggestion(null)
+    const draft = question.trim()
+    if (draft.length < SUGGEST_MIN_CHARS || busy) return
+    const seq = ++suggestSeq.current
+    const timer = setTimeout(() => {
+      api.suggest({ draft })
+        .then((d) => { if (seq === suggestSeq.current && d.suggestion) setSuggestion(d.suggestion) })
+        // Not worth an error banner over a background suggestion, but silent enough
+        // otherwise that a broken backend/proxy would look identical to "no typo found".
+        .catch((e) => console.warn('suggest() failed:', e.message))
+    }, SUGGEST_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [question, busy])
+
+  function acceptSuggestion() {
+    setQuestion(suggestion)
+    setSuggestion(null)
+  }
 
   async function send() {
     const text = question.trim()
@@ -75,7 +107,8 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
         <aside className="chat-side">
           <ConversationList conversations={conversations} activeId={activeId} onSelect={setActiveId}
                             onNew={startNew} onImportClick={importClick} fileInputRef={fileInputRef}
-                            onImportFile={importFile} onExport={exportConversation} onDelete={deleteConversation} />
+                            onImportFile={importFile} onExport={exportConversation} onDelete={deleteConversation}
+                            onRename={renameConversation} />
         </aside>
       )}
 
@@ -181,6 +214,18 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
 
       <Err error={error || importError} />
       <div className="composer">
+        {suggestion && (
+          <div className="suggest-popup">
+            <div className="suggest-text">
+              <strong>did you mean to write this?</strong>
+              {suggestion}
+            </div>
+            <div className="suggest-actions">
+              <button className="btn btn-primary btn-sm" onClick={acceptSuggestion}>use this</button>
+              <button className="btn btn-outline btn-sm" onClick={() => setSuggestion(null)}>keep mine</button>
+            </div>
+          </div>
+        )}
         <textarea value={question} placeholder={"Ask Libra Assist\u2026  (Enter to send, Shift+Enter for a new line)"}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />

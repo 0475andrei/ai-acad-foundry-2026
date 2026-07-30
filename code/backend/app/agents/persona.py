@@ -55,6 +55,18 @@ class Persona:
                 )
             parts.append(" ".join(grounding))
 
+        # The source documents are English-only, but the person asking is not
+        # necessarily. Translation is the model's job, not a separate service —
+        # so this is the one rule every persona gets, unconditionally.
+        parts.append(
+            "Always answer in the same language the user's question is written in, "
+            "regardless of what language this instruction or the retrieved context is "
+            "in. The source documents are in English — if the question is in Romanian "
+            "(or any other language), translate the relevant facts and write the full "
+            "answer in that language; do not answer in English just because the "
+            "documents are in English, and do not mix languages within the answer."
+        )
+
         return "\n\n".join(parts)
 
     def summary(self) -> dict:
