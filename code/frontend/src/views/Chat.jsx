@@ -13,6 +13,19 @@ const USER_DEFAULT_MODE = 'foundry'
 const SUGGEST_MIN_CHARS = 12
 const SUGGEST_DEBOUNCE_MS = 900
 
+// Turns the backend's guardrail report into one tooltip string, or null when clean.
+// Flags are informational, not a block — the answer still went through — this is
+// what tells you *why* it's worth a second look.
+function describeGuardrails(g) {
+  if (!g) return null
+  const parts = []
+  if (g.question_flags?.length) parts.push(`question: ${g.question_flags.join(', ')}`)
+  for (const [index, flags] of Object.entries(g.context_flags || {})) {
+    parts.push(`passage [${Number(index) + 1}]: ${flags.join(', ')}`)
+  }
+  return parts.length ? parts.join(' · ') : null
+}
+
 export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true, convo }) {
   const { conversations, activeId, setActiveId, active, updateActive, setMessages,
           startNew, deleteConversation, renameConversation, fileInputRef, importClick,
@@ -179,6 +192,7 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
           if (m.role === 'user') return <div className="msg user" key={i}>{m.text}</div>
           if (m.role === 'err') return <div className="msg err" key={i}><strong>Request failed:</strong> {m.text}</div>
           const d = m.data
+          const guardrailHit = describeGuardrails(d.guardrails)
           return (
             <div className="msg bot" key={i}>
               {d.answer}
@@ -188,6 +202,7 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
                 <span className="badge muted">{d.agent?.mode}</span>
                 <span className="badge muted">{d.model}</span>
                 {d.usage && <span className="badge muted">{d.usage.prompt_tokens} {d.usage.completion_tokens} tokens</span>}
+                {guardrailHit && <span className="badge crimson" title={guardrailHit}>⚠ guardrail flag</span>}
                 <SpeakButton text={d.answer} />
               </div>
               {d.retrieved?.length > 0 && (

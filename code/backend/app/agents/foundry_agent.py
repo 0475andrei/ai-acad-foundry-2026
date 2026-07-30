@@ -286,6 +286,14 @@ def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[di
     the Assistants-style API only accepts role="user" on client-added messages,
     so there is nowhere to post prior assistant replies anyway. Continuity comes
     from folding `history` into the prompt text instead, same as the local agent.
+
+    Known gap, not a bug: unlike local_agent.py (see reasoning_extras() in llm.py),
+    this run body sends no model-tuning parameters at all — no reasoning_effort
+    equivalent, nothing. Whether the Create Run REST operation at this api-version
+    even accepts one is unconfirmed (deliberately not guessed at here — see the
+    module docstring on why this file speaks raw REST rather than a moving SDK
+    surface); a hosted gpt-5-family agent has no way to control reasoning effort
+    through this codebase today. Local mode does; Foundry mode does not.
     """
     user = build_user_prompt(question, chunks, history)
 

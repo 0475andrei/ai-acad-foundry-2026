@@ -5,21 +5,22 @@ Swagger UI:  /docs        ReDoc: /redoc
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from . import chunking
+from . import chunking, guardrails
 from .agents import foundry_agent, local_agent
 from .agents.persona import PersonaNotFound, available_names, load_persona, list_personas, PERSONA_DIR
 from .config import settings
 from .embeddings import get_embedder
-from .llm import get_llm
+from .llm import get_llm, reasoning_extras
+from .ratelimit import RateLimiter, rate_limit_dependency
 from .schemas import (
     AgentInfo, AgentListResponse, AskRequest, AskResponse, AzureDeployment, AzureDeployments,
     AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, FoundryAvailability,
-    Health, HostedAgent, IngestRequest, IngestResponse, PersonaSummary, ScrapeRequest,
-    ScrapeResponse, SearchHit, SearchRequest, SearchResponse, SpeakRequest,
+    GuardrailReport, Health, HostedAgent, IngestRequest, IngestResponse, PersonaSummary,
+    ScrapeRequest, ScrapeResponse, SearchHit, SearchRequest, SearchResponse, SpeakRequest,
     SuggestRequest, SuggestResponse, TranscribeResponse, Usage, WebSearchHit, WebSearchRequest,
     WebSearchResponse, AzureSearchQueryRequest, AzureSearchSyncRequest,
 )
@@ -41,6 +42,14 @@ app.add_middleware(
 )
 
 store = VectorStore()
+
+# Three tiers, not one: /ask is the most expensive call and gets the tightest sustained
+# rate; /tools/suggest fires automatically while typing (debounced, but automatic) and
+# needs headroom so ordinary use never trips it; everything else that spends money
+# (speech, transcription, scraping, embeddings) shares a middle tier.
+_ask_limiter = RateLimiter(settings.rate_limit_ask_burst, settings.rate_limit_ask_per_minute / 60)
+_suggest_limiter = RateLimiter(settings.rate_limit_suggest_burst, settings.rate_limit_suggest_per_minute / 60)
+_tools_limiter = RateLimiter(settings.rate_limit_tools_burst, settings.rate_limit_tools_per_minute / 60)
 
 
 # --- helpers ------------------------------------------------------------------
@@ -255,7 +264,8 @@ def chunk_only(req: ChunkRequest) -> ChunkResponse:
 
 
 # --- ingestion ----------------------------------------------------------------
-@app.post("/ingest", response_model=IngestResponse, tags=["2 · ingestion"])
+@app.post("/ingest", response_model=IngestResponse, tags=["2 · ingestion"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def ingest(req: IngestRequest) -> IngestResponse:
     """Chunk -> embed -> store in Qdrant. The response shows the chunks, the
     vector dimension, and a peek at the first embedding."""
@@ -294,7 +304,8 @@ def collection_reset() -> dict:
 
 
 # --- retrieval ----------------------------------------------------------------
-@app.post("/search", response_model=SearchResponse, tags=["3 · retrieval"])
+@app.post("/search", response_model=SearchResponse, tags=["3 · retrieval"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def search(req: SearchRequest) -> SearchResponse:
     """Embed the query, return the nearest chunks with their cosine similarity
     scores — retrieval with the curtain open."""
@@ -312,7 +323,8 @@ def search(req: SearchRequest) -> SearchResponse:
 
 
 # --- generation ---------------------------------------------------------------
-@app.post("/ask", response_model=AskResponse, tags=["4 · generation"])
+@app.post("/ask", response_model=AskResponse, tags=["4 · generation"],
+         dependencies=[Depends(rate_limit_dependency(_ask_limiter))])
 def ask(req: AskRequest) -> AskResponse:
     """The finale: an **agent** answers, with or without retrieval.
 
@@ -356,10 +368,20 @@ def ask(req: AskRequest) -> AskResponse:
         retrieved = [SearchHit(**h) for h in store.search(qvec, top_k)]
 
     chunks = [h.model_dump() for h in retrieved]
+    # Flagged, never dropped — same "show the pipeline" rule as everything else this
+    # endpoint returns. The real barrier is the standing rule in the system prompt
+    # (persona.py); this is the visible early-warning layer on top of it.
+    guardrail_report = GuardrailReport(
+        question_flags=guardrails.scan(req.question),
+        context_flags=guardrails.scan_passages(chunks),
+    )
     mode = mode_requested
     # Cap what we fold into the prompt — a long-running demo chat shouldn't grow
-    # the token bill (or the prompt shown in `prompt_sent`) without bound.
-    history = [h.model_dump() for h in req.history[-20:]]
+    # the token bill (or the prompt shown in `prompt_sent`) without bound. Every
+    # turn resends the full text of every turn kept here, uncompressed, so the
+    # cap is deliberately tighter than "as much as fits" — 10 is still plenty to
+    # demonstrate multi-turn continuity in class.
+    history = [h.model_dump() for h in req.history[-10:]]
 
     # ---- run the agent ------------------------------------------------------
     try:
@@ -395,6 +417,7 @@ def ask(req: AskRequest) -> AskResponse:
         system_prompt=reply.system_prompt,
         prompt_sent=reply.prompt_sent,
         retrieved=retrieved,
+        guardrails=guardrail_report,
         usage=Usage(prompt_tokens=reply.prompt_tokens, completion_tokens=reply.completion_tokens),
     )
 
@@ -527,7 +550,8 @@ _SUGGEST_SYSTEM = (
 )
 
 
-@app.post("/tools/suggest", response_model=SuggestResponse, tags=["6 · tools"])
+@app.post("/tools/suggest", response_model=SuggestResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_suggest_limiter))])
 def suggest(req: SuggestRequest) -> SuggestResponse:
     """The "did you mean" popup above the composer: one small, fast model call that
     turns a rough draft into a clean question, or says NONE when there is nothing
@@ -540,8 +564,9 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     # thinking before they write a word of visible output. Without a cap on that, a
     # short rewrite like this one can burn the whole budget on hidden reasoning and
     # come back with an empty answer — silently, since that just looks like "no
-    # suggestion needed". Capping effort here is what keeps output tokens available.
-    extras = {"reasoning_effort": "minimal"} if "gpt-5" in llm.model.lower() else {}
+    # suggestion needed". reasoning_extras() (llm.py) is what keeps output tokens
+    # available — same helper local_agent.py uses for /ask.
+    extras = reasoning_extras(llm.model)
     try:
         result = llm.chat(system=_SUGGEST_SYSTEM, user=draft, temperature=0.2,
                           max_tokens=300, extras=extras)
@@ -553,7 +578,8 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     return SuggestResponse(suggestion=suggestion, provider=result.provider, model=result.model)
 
 
-@app.post("/tools/web-fetch", response_model=ScrapeResponse, tags=["6 · tools"])
+@app.post("/tools/web-fetch", response_model=ScrapeResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def web_fetch(req: ScrapeRequest) -> ScrapeResponse:
     """Fetch a page and strip it to text — **the do-it-yourself lane**.
 
@@ -569,7 +595,8 @@ def web_fetch(req: ScrapeRequest) -> ScrapeResponse:
 
 
 @app.post("/tools/speak", tags=["6 · tools"],
-          responses={200: {"content": {"audio/wav": {}}, "description": "WAV audio"}})
+          responses={200: {"content": {"audio/wav": {}}, "description": "WAV audio"}},
+          dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def speak(req: SpeakRequest):
     """Text → speech (Azure AI Speech). Returns a WAV file you can play or download."""
     try:
@@ -582,7 +609,8 @@ def speak(req: SpeakRequest):
                     headers={"Content-Disposition": 'inline; filename="libra-assist.wav"'})
 
 
-@app.post("/tools/web-search", response_model=WebSearchResponse, tags=["6 · tools"])
+@app.post("/tools/web-search", response_model=WebSearchResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def web_search(req: WebSearchRequest) -> WebSearchResponse:
     """Search the open web — **without an API key**.
 
@@ -625,7 +653,8 @@ def web_search(req: WebSearchRequest) -> WebSearchResponse:
     )
 
 
-@app.post("/tools/azure-search/sync", tags=["7 · Azure AI Search"])
+@app.post("/tools/azure-search/sync", tags=["7 · Azure AI Search"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def azure_search_sync(req: AzureSearchSyncRequest) -> dict:
     """Chunk, embed and push into **Azure AI Search** instead of the local store.
 
@@ -649,7 +678,8 @@ def azure_search_sync(req: AzureSearchSyncRequest) -> dict:
     }
 
 
-@app.post("/tools/azure-search/query", tags=["7 · Azure AI Search"])
+@app.post("/tools/azure-search/query", tags=["7 · Azure AI Search"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 def azure_search_query(req: AzureSearchQueryRequest) -> dict:
     """Keyword, vector or **hybrid** search — run the same query three ways and
     compare. Hybrid is where exact terms and paraphrases both land."""
@@ -670,7 +700,8 @@ def azure_search_status() -> dict:
     return aisearch.describe()
 
 
-@app.post("/tools/transcribe", response_model=TranscribeResponse, tags=["6 · tools"])
+@app.post("/tools/transcribe", response_model=TranscribeResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
 async def transcribe(file: UploadFile = File(..., description="WAV, 16 kHz mono, under ~60 s")):
     """Speech → text (Azure AI Speech). Upload the WAV you just generated and
     watch it come back as text — the round trip in two calls."""

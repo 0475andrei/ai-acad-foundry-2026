@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     llm_max_tokens: int = 2500   # reasoning models spend part of this budget thinking
 
+    # --- rate limiting (in-memory, per-process, per source IP — see ratelimit.py) --
+    rate_limit_enabled: bool = True
+    rate_limit_ask_per_minute: float = 6       # /ask — the most expensive call
+    rate_limit_ask_burst: int = 3
+    rate_limit_suggest_per_minute: float = 30  # fires while typing — looser on purpose
+    rate_limit_suggest_burst: int = 6
+    rate_limit_tools_per_minute: float = 12    # speak / transcribe / web / ingest / search
+    rate_limit_tools_burst: int = 5
+
     # --- provider selection --------------------------------------------------
     llm_provider: str = "openai"            # lmstudio | openai | anthropic | azure
     embedding_provider: str = "openai"      # lmstudio | openai | azure  (Anthropic has no embeddings API)

@@ -124,7 +124,7 @@ class AskRequest(BaseModel):
         default_factory=list,
         description="Prior turns in this conversation, oldest first — user and assistant "
                     "only, no system messages. The backend is stateless, so the frontend "
-                    "resends this on every call; only the most recent 20 turns are used.",
+                    "resends this on every call; only the most recent 10 turns are used.",
     )
     use_rag: bool = Field(True, description="false = plain LLM; true = retrieve then augment")
     top_k: Optional[int] = Field(None, ge=1, le=50)
@@ -236,6 +236,19 @@ class Usage(BaseModel):
     completion_tokens: Optional[int] = None
 
 
+class GuardrailReport(BaseModel):
+    """Pattern-based prompt-injection flags — reported, never used to silently
+    drop anything, so the pipeline stays as visible as everywhere else in this API."""
+
+    question_flags: list[str] = Field(
+        default_factory=list, description="Injection-shaped patterns found in the user's question")
+    context_flags: dict[int, list[str]] = Field(
+        default_factory=dict,
+        description="Injection-shaped patterns found in retrieved passages, keyed by "
+                    "their index in `retrieved` — a poisoned document, not the user",
+    )
+
+
 class AskResponse(BaseModel):
     answer: str
     augmented: bool
@@ -245,6 +258,7 @@ class AskResponse(BaseModel):
     system_prompt: str = Field(description="The system message actually sent")
     prompt_sent: str = Field(description="The exact user prompt sent to the model — compare with/without RAG")
     retrieved: list[SearchHit] = Field(default_factory=list)
+    guardrails: GuardrailReport = Field(default_factory=GuardrailReport)
     usage: Optional[Usage] = None
 
 

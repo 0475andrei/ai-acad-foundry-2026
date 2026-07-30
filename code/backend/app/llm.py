@@ -20,6 +20,20 @@ class ChatResult:
     completion_tokens: int | None = None
 
 
+def reasoning_extras(model: str, override: str | None = None) -> dict:
+    """extras for LLM.chat(): honour an explicit reasoning_effort when one was
+    chosen deliberately (a persona file, a caller); otherwise default gpt-5-family
+    models to 'minimal' so they don't spend the whole max_tokens budget on hidden
+    reasoning before writing any visible output. Non-reasoning models and every
+    other family get {} — untouched, unaffected.
+    """
+    if override:
+        return {"reasoning_effort": override}
+    if "gpt-5" in model.lower():
+        return {"reasoning_effort": "minimal"}
+    return {}
+
+
 class LLM:
     def __init__(self, provider: str, model: str, client) -> None:
         self.provider = provider

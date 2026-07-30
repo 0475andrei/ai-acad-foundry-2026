@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..config import settings
-from ..llm import get_llm
+from ..llm import get_llm, reasoning_extras
 from .persona import Persona
 
 
@@ -72,11 +72,12 @@ def run(
     max_tokens = persona.max_tokens or settings.llm_max_tokens
 
     # Reasoning models (the gpt-5 family) spend part of the completion budget thinking
-    # before they write. A persona can cap that so short, stylistic answers are not
-    # starved of visible output tokens.
-    extras = {"reasoning_effort": persona.reasoning_effort} if persona.reasoning_effort else {}
-
+    # before they write. A persona can cap that deliberately (andrei-dobrin-agent,
+    # lyrical, teller all set "low"); for one that doesn't (default, compliance),
+    # reasoning_extras() still defaults gpt-5-family models to "minimal" rather than
+    # leaving them free to burn the whole budget on hidden reasoning and return empty.
     llm = get_llm()
+    extras = reasoning_extras(llm.model, persona.reasoning_effort)
     result = llm.chat(system=system, user=user, temperature=temp,
                       max_tokens=max_tokens, extras=extras)
 
