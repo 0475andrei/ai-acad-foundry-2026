@@ -1,64 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { Err, RunsOnBadge, SpeakButton, MicButton } from '../components'
-import { loadConversations, saveConversations, loadActiveId, saveActiveId,
-         newConversation, titleFrom, exportConversation, readConversationFile } from '../conversations'
+import { ConversationList, Err, RunsOnBadge, SpeakButton, MicButton } from '../components'
+import { titleFrom, exportConversation } from '../conversations'
 
-export default function Chat({ agents, hostedOnly = [], foundry }) {
-  const [conversations, setConversations] = useState(() => {
-    const loaded = loadConversations()
-    return loaded.length ? loaded : [newConversation()]
-  })
-  const [activeId, setActiveId] = useState(() => {
-    const saved = loadActiveId()
-    return saved && conversations.some((c) => c.id === saved) ? saved : conversations[0].id
-  })
-  const active = conversations.find((c) => c.id === activeId) || conversations[0]
+// The "simple user" role always talks to the same persona over the same lane, so
+// there is nothing for them to pick — these are the fixed defaults for that role.
+const USER_DEFAULT_AGENT = 'andrei-dobrin-agent'
+const USER_DEFAULT_MODE = 'foundry'
+
+export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true, convo }) {
+  const { conversations, activeId, setActiveId, active, updateActive, setMessages,
+          startNew, deleteConversation, fileInputRef, importClick, importFile, importError } = convo
   const messages = active.messages
 
-  useEffect(() => { saveConversations(conversations) }, [conversations])
-  useEffect(() => { saveActiveId(activeId) }, [activeId])
-
-  function updateActive(updater) {
-    setConversations((cs) => cs.map((c) => (c.id === activeId ? updater(c) : c)))
-  }
-  function setMessages(next) {
-    updateActive((c) => ({ ...c, messages: typeof next === 'function' ? next(c.messages) : next }))
-  }
-  function startNew() {
-    const conv = newConversation()
-    setConversations((cs) => [conv, ...cs])
-    setActiveId(conv.id)
-  }
-  function deleteConversation(id) {
-    setConversations((cs) => {
-      const rest = cs.filter((c) => c.id !== id)
-      const next = rest.length ? rest : [newConversation()]
-      if (id === activeId) setActiveId(next[0].id)
-      return next
-    })
-  }
-
-  const fileInputRef = useRef(null)
-  function importClick() { fileInputRef.current?.click() }
-  async function importFile(e) {
-    const file = e.target.files?.[0]
-    e.target.value = ''   // lets the same filename be re-imported later
-    if (!file) return
-    try {
-      const conv = await readConversationFile(file)
-      setConversations((cs) => [conv, ...cs])
-      setActiveId(conv.id)
-      setError(null)
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
   const [question, setQuestion] = useState('')
-  const [agent, setAgent] = useState('default')
+  const [agent, setAgent] = useState(() => (isAdmin ? 'default' : USER_DEFAULT_AGENT))
   const [useRag, setUseRag] = useState(true)
-  const [mode, setMode] = useState('local')
+  const [mode, setMode] = useState(() => (isAdmin ? 'local' : USER_DEFAULT_MODE))
   const [topK, setTopK] = useState(3)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -111,63 +69,50 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
 
   return (
     <div className="chat-shell">
-      <aside className="chat-side">
-        <div style={{ display: 'flex', gap: '.4rem', marginBottom: '.6rem' }}>
-          <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={startNew}>
-            + new chat
-          </button>
-          <button className="btn btn-outline btn-sm" title="Import a conversation exported as JSON"
-                  onClick={importClick}>
-            import
-          </button>
-        </div>
-        <input ref={fileInputRef} type="file" accept="application/json,.json"
-               style={{ display: 'none' }} onChange={importFile} />
-        {conversations
-          .slice()
-          .sort((a, b) => b.createdAt - a.createdAt)
-          .map((c) => (
-            <div key={c.id} className={`convo-item ${c.id === activeId ? 'active' : ''}`}
-                 onClick={() => setActiveId(c.id)}>
-              <span className="convo-title" title={c.title}>{c.title}</span>
-              <button className="convo-export" title="Export this chat as JSON"
-                      onClick={(e) => { e.stopPropagation(); exportConversation(c) }}>
-                ↓
-              </button>
-              <button className="convo-del" title="Delete this chat"
-                      onClick={(e) => { e.stopPropagation(); deleteConversation(c.id) }}>
-                ×
-              </button>
-            </div>
-          ))}
-      </aside>
+      {/* Non-admin users get this same list, but rendered in the app's own left rail
+          instead — see App.jsx — since it's now the only thing there is to navigate. */}
+      {isAdmin && (
+        <aside className="chat-side">
+          <ConversationList conversations={conversations} activeId={activeId} onSelect={setActiveId}
+                            onNew={startNew} onImportClick={importClick} fileInputRef={fileInputRef}
+                            onImportFile={importFile} onExport={exportConversation} onDelete={deleteConversation} />
+        </aside>
+      )}
 
       <div className="chat-wrap">
       <div className="chat-bar">
-        <select value={agent} onChange={(e) => setAgent(e.target.value)} title="Which persona answers">
-          {agents.map((a) => <option key={a.name} value={a.name}>{a.display_name}</option>)}
-          {hostedOnly.length > 0 && (
-            <optgroup label="hosted in Foundry only">
-              {hostedOnly.map((a) => <option key={a.name} value={a.name}>{a.display_name}</option>)}
-            </optgroup>
-          )}
-        </select>
-        {current && <RunsOnBadge runsOn={current.runs_on} reason={foundry?.reason} />}
-        <label className="check" style={{ margin: 0 }} title="Retrieve from your documents and ground the answer">
-          <input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} />
-          use RAG
-        </label>
-        <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ minWidth: '9rem' }}
-                title="Where the loop executes">
-          <option value="local" disabled={localImpossible}
-                  title={localImpossible ? 'This agent has no local JSON file' : ''}>
-            local agent
-          </option>
-          <option value="foundry" disabled={foundryBlocked} title={foundryBlocked ? foundryWhy : ''}>
-            Foundry agent{foundryReachable === false ? ' — no identity'
-                          : foundryBlocked ? ' — not deployed' : ''}
-          </option>
-        </select>
+        {isAdmin ? (
+          <>
+            <select value={agent} onChange={(e) => setAgent(e.target.value)} title="Which persona answers">
+              {agents.map((a) => <option key={a.name} value={a.name}>{a.display_name}</option>)}
+              {hostedOnly.length > 0 && (
+                <optgroup label="hosted in Foundry only">
+                  {hostedOnly.map((a) => <option key={a.name} value={a.name}>{a.display_name}</option>)}
+                </optgroup>
+              )}
+            </select>
+            {current && <RunsOnBadge runsOn={current.runs_on} reason={foundry?.reason} />}
+            <label className="check" style={{ margin: 0 }} title="Retrieve from your documents and ground the answer">
+              <input type="checkbox" checked={useRag} onChange={(e) => setUseRag(e.target.checked)} />
+              use RAG
+            </label>
+            <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ minWidth: '9rem' }}
+                    title="Where the loop executes">
+              <option value="local" disabled={localImpossible}
+                      title={localImpossible ? 'This agent has no local JSON file' : ''}>
+                local agent
+              </option>
+              <option value="foundry" disabled={foundryBlocked} title={foundryBlocked ? foundryWhy : ''}>
+                Foundry agent{foundryReachable === false ? ' — no identity'
+                              : foundryBlocked ? ' — not deployed' : ''}
+              </option>
+            </select>
+          </>
+        ) : (
+          <span className="badge" title={current?.description || 'Andrei’s Product Specialist'}>
+            {current?.display_name || 'Andrei’s Product Specialist'}
+          </span>
+        )}
         <span className="badge muted" style={{ gap: '.35rem' }} title="Passages to retrieve">
           top-k
           <input type="number" min="1" max="10" value={topK} onChange={(e) => setTopK(e.target.value)}
@@ -234,7 +179,7 @@ export default function Chat({ agents, hostedOnly = [], foundry }) {
         <div ref={endRef} />
       </div>
 
-      <Err error={error} />
+      <Err error={error || importError} />
       <div className="composer">
         <textarea value={question} placeholder={"Ask Libra Assist\u2026  (Enter to send, Shift+Enter for a new line)"}
                   onChange={(e) => setQuestion(e.target.value)}

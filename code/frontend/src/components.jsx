@@ -65,6 +65,45 @@ export function RunsOnBadge({ runsOn, reason }) {
   return <span className={`badge ${s.tone}`} title={runsOn === 'unknown' && reason ? reason : s.hint}>{s.label}</span>
 }
 
+/** The chat-history list: new/import controls plus the conversation rows. Rendered
+ * inside the Chat view for admins, or inside the app's own left rail for the
+ * single-agent "user" role — same list, two different homes depending on isAdmin. */
+export function ConversationList({ conversations, activeId, onSelect, onNew, onImportClick,
+                                    fileInputRef, onImportFile, onExport, onDelete }) {
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '.4rem', marginBottom: '.6rem' }}>
+        <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onNew}>
+          + new chat
+        </button>
+        <button className="btn btn-outline btn-sm" title="Import a conversation exported as JSON"
+                onClick={onImportClick}>
+          import
+        </button>
+      </div>
+      <input ref={fileInputRef} type="file" accept="application/json,.json"
+             style={{ display: 'none' }} onChange={onImportFile} />
+      {conversations
+        .slice()
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .map((c) => (
+          <div key={c.id} className={`convo-item ${c.id === activeId ? 'active' : ''}`}
+               onClick={() => onSelect(c.id)}>
+            <span className="convo-title" title={c.title}>{c.title}</span>
+            <button className="convo-export" title="Export this chat as JSON"
+                    onClick={(e) => { e.stopPropagation(); onExport(c) }}>
+              ↓
+            </button>
+            <button className="convo-del" title="Delete this chat"
+                    onClick={(e) => { e.stopPropagation(); onDelete(c.id) }}>
+              ×
+            </button>
+          </div>
+        ))}
+    </>
+  )
+}
+
 export function ChunkList({ chunks }) {
   if (!chunks?.length) return null
   return (

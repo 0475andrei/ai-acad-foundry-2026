@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+
 // Saved chats live in localStorage — this is a single-user console with no
 // backend session store, so the browser is the only place to keep them.
 const CONVERSATIONS_KEY = 'libra-assist-conversations'
@@ -82,4 +84,70 @@ export function readConversationFile(file) {
     }
     reader.readAsText(file)
   })
+}
+
+/** All chat-history state and its CRUD, in one hook. The list needs to render in two
+ * different places depending on role — inside the Chat view for admins, in the app's
+ * own left rail for the single-agent "user" role — so the state has to live above
+ * both, in whichever component calls this hook once, and get passed down from there. */
+export function useConversationManager() {
+  const [conversations, setConversations] = useState(() => {
+    const loaded = loadConversations()
+    return loaded.length ? loaded : [newConversation()]
+  })
+  const [activeId, setActiveId] = useState(() => {
+    const saved = loadActiveId()
+    return saved && conversations.some((c) => c.id === saved) ? saved : conversations[0].id
+  })
+
+  useEffect(() => { saveConversations(conversations) }, [conversations])
+  useEffect(() => { saveActiveId(activeId) }, [activeId])
+
+  const active = conversations.find((c) => c.id === activeId) || conversations[0]
+
+  const updateActive = useCallback((updater) => {
+    setConversations((cs) => cs.map((c) => (c.id === activeId ? updater(c) : c)))
+  }, [activeId])
+
+  const setMessages = useCallback((next) => {
+    updateActive((c) => ({ ...c, messages: typeof next === 'function' ? next(c.messages) : next }))
+  }, [updateActive])
+
+  const startNew = useCallback(() => {
+    const conv = newConversation()
+    setConversations((cs) => [conv, ...cs])
+    setActiveId(conv.id)
+  }, [])
+
+  const deleteConversation = useCallback((id) => {
+    setConversations((cs) => {
+      const rest = cs.filter((c) => c.id !== id)
+      const next = rest.length ? rest : [newConversation()]
+      setActiveId((cur) => (id === cur ? next[0].id : cur))
+      return next
+    })
+  }, [])
+
+  const fileInputRef = useRef(null)
+  const importClick = useCallback(() => fileInputRef.current?.click(), [])
+  const [importError, setImportError] = useState(null)
+  const importFile = useCallback(async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''   // lets the same filename be re-imported later
+    if (!file) return
+    try {
+      const conv = await readConversationFile(file)
+      setConversations((cs) => [conv, ...cs])
+      setActiveId(conv.id)
+      setImportError(null)
+    } catch (err) {
+      setImportError(err.message)
+    }
+  }, [])
+
+  return {
+    conversations, activeId, setActiveId, active,
+    updateActive, setMessages, startNew, deleteConversation,
+    fileInputRef, importClick, importFile, importError,
+  }
 }

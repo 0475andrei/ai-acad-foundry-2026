@@ -65,6 +65,7 @@ a { color: var(--accent); }
 .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .nav-item .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .5; }
 .nav-item.active .dot { opacity: 1; }
+.side-history { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; margin: .3rem 0 .6rem; }
 .side-foot { margin-top: auto; padding: .7rem .6rem .2rem; font-size: .72rem; color: var(--text-faint); border-top: 1px solid var(--border); padding-top: .9rem; }
 
 .main { padding: 1.6rem clamp(1rem, 3vw, 2.6rem) 2.6rem; overflow-x: hidden; }
@@ -80,6 +81,7 @@ a { color: var(--accent); }
 @media (max-width: 900px) {
   .grid2 { grid-template-columns: 1fr; } .app { grid-template-columns: 1fr; }
   .side { flex-direction: row; overflow-x: auto; align-items: center; } .nav-group { display: none; }
+  .side-history { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
   .brand { padding-bottom: 0; }
   .chat-shell { flex-direction: column; height: auto; }
   .chat-side { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0;

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
-import { Logo } from './components'
+import { ConversationList, Logo } from './components'
+import { exportConversation, useConversationManager } from './conversations'
 import { loadSession, logout } from './auth'
 import Login from './views/Login'
 import Agents from './views/Agents'
@@ -29,6 +30,7 @@ export default function App() {
   const [health, setHealth] = useState(null)
   const [azure, setAzure] = useState(null)
   const [theme, setTheme] = useState('dark')
+  const convo = useConversationManager()
 
   const loadAgents = useCallback(() => {
     api.agents()
@@ -62,7 +64,10 @@ export default function App() {
     <div className="app">
       <aside className="side">
         <p className="brand"><Logo /><span>Libra Assist<small>console</small></span></p>
-        {groups.map((g) => (
+        {/* A "simple user" only ever has Chat, so the nav list would show one dead
+            button. Drop it and show the chat history right here instead — one
+            left-hand list, not a "Chat" button stacked on top of a second sidebar. */}
+        {isAdmin && groups.map((g) => (
           <div key={g}>
             <div className="nav-group">{g}</div>
             {visibleViews.filter((v) => v.group === g).map((v) => (
@@ -72,6 +77,15 @@ export default function App() {
             ))}
           </div>
         ))}
+        {!isAdmin && (
+          <div className="side-history">
+            <ConversationList conversations={convo.conversations} activeId={convo.activeId}
+                              onSelect={convo.setActiveId} onNew={convo.startNew}
+                              onImportClick={convo.importClick} fileInputRef={convo.fileInputRef}
+                              onImportFile={convo.importFile} onExport={exportConversation}
+                              onDelete={convo.deleteConversation} />
+          </div>
+        )}
         <div className="side-foot">
           <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', marginBottom: '.4rem' }}>
             <span className="dot" style={{ width: 7, height: 7, borderRadius: '50%',
@@ -104,7 +118,7 @@ export default function App() {
             views: unmounting it mid-request would drop the answer when it comes back,
             since the setState that attaches it would land on an instance that's gone. */}
         <div style={{ display: view === 'chat' ? 'contents' : 'none' }}>
-          <Chat agents={agents} hostedOnly={hostedOnly} foundry={foundry} />
+          <Chat agents={agents} hostedOnly={hostedOnly} foundry={foundry} isAdmin={isAdmin} convo={convo} />
         </div>
         {isAdmin && view === 'knowledge' && <Knowledge />}
         {isAdmin && view === 'search' && <Search />}
