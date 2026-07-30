@@ -36,7 +36,7 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
   const [agent, setAgent] = useState(() => (isAdmin ? 'default' : USER_DEFAULT_AGENT))
   const [useRag, setUseRag] = useState(true)
   const [mode, setMode] = useState(() => (isAdmin ? 'local' : USER_DEFAULT_MODE))
-  const [topK, setTopK] = useState(3)
+  const [topK, setTopK] = useState(6)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const endRef = useRef(null)
@@ -67,6 +67,27 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
   function acceptSuggestion() {
     setQuestion(suggestion)
     setSuggestion(null)
+  }
+
+  // Thumbs up/down on a bot reply. Click the same one again to undo it — that
+  // undo only removes the highlight locally; it does not retract the logged
+  // entry, since the point is a record of what was submitted, not a live tally.
+  function voteOn(index, rating) {
+    const msg = messages[index]
+    if (!msg || msg.role !== 'bot') return
+    const nextVote = msg.vote === rating ? null : rating
+    setMessages((ms) => ms.map((m, i) => (i === index ? { ...m, vote: nextVote } : m)))
+    if (!nextVote) return
+    const priorUser = messages.slice(0, index).reverse().find((m) => m.role === 'user')
+    api.feedback({
+      rating: nextVote,
+      question: priorUser?.text || '',
+      answer: msg.data.answer,
+      agent: msg.data.agent?.name,
+      mode: msg.data.agent?.mode,
+      augmented: msg.data.augmented,
+      model: msg.data.model,
+    }).catch((e) => console.warn('feedback failed:', e.message))
   }
 
   async function send() {
@@ -203,8 +224,25 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
                 <span className="badge muted">{d.model}</span>
                 {d.usage && <span className="badge muted">{d.usage.prompt_tokens} {d.usage.completion_tokens} tokens</span>}
                 {guardrailHit && <span className="badge crimson" title={guardrailHit}>⚠ guardrail flag</span>}
+                {d.pii?.redacted?.length > 0 && (
+                  <span className="badge crimson" title={`Redacted before the model saw it: ${d.pii.redacted.join(', ')}`}>
+                    🔒 personal data redacted
+                  </span>
+                )}
                 <SpeakButton text={d.answer} />
+                <span className="vote-group">
+                  <button className={`vote-btn ${m.vote === 'up' ? 'vote-up-active' : ''}`}
+                          title="Good answer" onClick={() => voteOn(i, 'up')}>👍</button>
+                  <button className={`vote-btn ${m.vote === 'down' ? 'vote-down-active' : ''}`}
+                          title="Not helpful" onClick={() => voteOn(i, 'down')}>👎</button>
+                </span>
               </div>
+              {d.retrieval_query && (
+                <div className="muted" style={{ fontSize: '.78rem', marginTop: '.4rem' }}
+                     title="The question was translated to English for document search only — the answer above was generated from what you actually asked.">
+                  searched using: <em>{d.retrieval_query}</em>
+                </div>
+              )}
               {d.retrieved?.length > 0 && (
                 <details className="sources">
                   <summary>{d.retrieved.length} retrieved passage{d.retrieved.length > 1 ? 's' : ''}</summary>

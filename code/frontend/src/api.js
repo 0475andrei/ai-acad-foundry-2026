@@ -31,6 +31,8 @@ export const api = {
   search: (payload) => request('/search', { method: 'POST', body: payload }),
   ask: (payload) => request('/ask', { method: 'POST', body: payload }),
   suggest: (payload) => request('/tools/suggest', { method: 'POST', body: payload }),
+  feedback: (payload) => request('/feedback', { method: 'POST', body: payload }),
+  listFeedback: (limit = 50) => request(`/feedback?limit=${limit}`),
 
   agents: () => request('/agents'),
   agent: (name) => request(`/agents/${encodeURIComponent(name)}`),

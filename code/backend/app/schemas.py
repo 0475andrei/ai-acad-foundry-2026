@@ -249,6 +249,18 @@ class GuardrailReport(BaseModel):
     )
 
 
+class PiiReport(BaseModel):
+    """What kinds of personal data were found and redacted from the question
+    before it reached embedding, guardrail scanning or the model — never the
+    values themselves. Empty means nothing was touched."""
+
+    redacted: list[str] = Field(
+        default_factory=list,
+        description="Kinds of personal data redacted, e.g. 'card-number', 'cnp', 'iban', "
+                    "'email', 'phone' — see app/pii.py",
+    )
+
+
 class AskResponse(BaseModel):
     answer: str
     augmented: bool
@@ -258,8 +270,46 @@ class AskResponse(BaseModel):
     system_prompt: str = Field(description="The system message actually sent")
     prompt_sent: str = Field(description="The exact user prompt sent to the model — compare with/without RAG")
     retrieved: list[SearchHit] = Field(default_factory=list)
+    retrieval_query: Optional[str] = Field(
+        None,
+        description="Set only when different from the question — the English translation "
+                    "actually used to embed and search, for a non-English question (see "
+                    "app/retrieval_lang.py). The answer is still generated from the original.",
+    )
     guardrails: GuardrailReport = Field(default_factory=GuardrailReport)
+    pii: PiiReport = Field(default_factory=PiiReport)
     usage: Optional[Usage] = None
+
+
+# --- feedback -------------------------------------------------------------------
+class FeedbackRequest(BaseModel):
+    model_config = {"json_schema_extra": {"examples": [{
+        "rating": "up",
+        "question": "What fee does Libra Bank charge for early mortgage repayment?",
+        "answer": "Libra Bank charges 1% of the outstanding balance during the fixed-rate period...",
+        "agent": "default",
+        "mode": "local",
+        "augmented": True,
+        "model": "gpt-5-mini",
+    }]}}
+
+    rating: Literal["up", "down"]
+    question: str = Field(..., min_length=1)
+    answer: str = Field(..., min_length=1)
+    agent: Optional[str] = Field(None, description="Which persona produced this answer")
+    mode: Optional[str] = Field(None, description="local or foundry")
+    augmented: bool = Field(False, description="Was this answer grounded with retrieval?")
+    model: Optional[str] = None
+
+
+class FeedbackEntry(FeedbackRequest):
+    id: str
+    created_at: str
+
+
+class FeedbackListResponse(BaseModel):
+    count: int
+    items: list[FeedbackEntry]
 
 
 # --- tools / services ---------------------------------------------------------

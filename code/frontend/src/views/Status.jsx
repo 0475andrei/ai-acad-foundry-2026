@@ -6,10 +6,17 @@ export default function Status({ health, reload, azure, reloadAzure }) {
   const [config, setConfig] = useState(null)
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(true)
+  const [feedback, setFeedback] = useState(null)
+  const [feedbackError, setFeedbackError] = useState(null)
 
   useEffect(() => {
     api.config().then(setConfig).catch((e) => setError(e.message)).finally(() => setBusy(false))
   }, [])
+
+  function loadFeedback() {
+    api.listFeedback(20).then(setFeedback).catch((e) => setFeedbackError(e.message))
+  }
+  useEffect(() => { loadFeedback() }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = health ? [
     ['API', health.status, health.status === 'ok'],
@@ -148,6 +155,35 @@ export default function Status({ health, reload, azure, reloadAzure }) {
           </div>
         )}
         <RawJson data={health} label="raw /health" />
+      </div>
+
+      <div className="card">
+        <div className="row" style={{ marginBottom: '.5rem' }}>
+          <h3 style={{ margin: 0 }}>Recent feedback</h3>
+          <button className="btn btn-outline btn-sm shrink" onClick={loadFeedback}>refresh</button>
+        </div>
+        <Err error={feedbackError} />
+        {!feedback ? <Spinner label="loading" /> : feedback.count === 0 ? (
+          <p className="faint">No 👍/👎 submitted yet — vote on an answer in Chat to see it here.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr><th style={{ width: '3rem' }}>rating</th><th>question</th><th style={{ width: '8rem' }}>agent</th>
+                  <th style={{ width: '7rem' }}>mode</th><th style={{ width: '9rem' }}>when</th></tr>
+            </thead>
+            <tbody>
+              {feedback.items.map((f) => (
+                <tr key={f.id}>
+                  <td><span className={`badge ${f.rating === 'up' ? '' : 'crimson'}`}>{f.rating === 'up' ? '👍' : '👎'}</span></td>
+                  <td>{f.question}</td>
+                  <td className="faint">{f.agent || '—'}</td>
+                  <td className="faint">{f.mode || '—'}{f.augmented ? ' · rag' : ''}</td>
+                  <td className="faint mono">{f.created_at.replace('T', ' ').replace(/\+00:00$/, ' UTC')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   )

@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     semantic_threshold: float = 0.75       # cosine cut-off for the 'semantic' strategy
 
     # --- retrieval / generation defaults ------------------------------------
-    top_k: int = 4
+    top_k: int = 6   # cross-lingual queries score every passage lower — more headroom
     llm_temperature: float = 0.2
     llm_max_tokens: int = 2500   # reasoning models spend part of this budget thinking
 

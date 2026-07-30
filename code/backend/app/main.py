@@ -5,11 +5,11 @@ Swagger UI:  /docs        ReDoc: /redoc
 """
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from . import chunking, guardrails
+from . import chunking, feedback_store, guardrails, pii, retrieval_lang
 from .agents import foundry_agent, local_agent
 from .agents.persona import PersonaNotFound, available_names, load_persona, list_personas, PERSONA_DIR
 from .config import settings
@@ -18,10 +18,11 @@ from .llm import get_llm, reasoning_extras
 from .ratelimit import RateLimiter, rate_limit_dependency
 from .schemas import (
     AgentInfo, AgentListResponse, AskRequest, AskResponse, AzureDeployment, AzureDeployments,
-    AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, FoundryAvailability,
-    GuardrailReport, Health, HostedAgent, IngestRequest, IngestResponse, PersonaSummary,
-    ScrapeRequest, ScrapeResponse, SearchHit, SearchRequest, SearchResponse, SpeakRequest,
-    SuggestRequest, SuggestResponse, TranscribeResponse, Usage, WebSearchHit, WebSearchRequest,
+    AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, FeedbackEntry,
+    FeedbackListResponse, FeedbackRequest, FoundryAvailability, GuardrailReport, Health,
+    HostedAgent, IngestRequest, IngestResponse, PersonaSummary, PiiReport, ScrapeRequest,
+    ScrapeResponse, SearchHit, SearchRequest, SearchResponse, SpeakRequest, SuggestRequest,
+    SuggestResponse, TranscribeResponse, Usage, WebSearchHit, WebSearchRequest,
     WebSearchResponse, AzureSearchQueryRequest, AzureSearchSyncRequest,
 )
 from .services import aisearch, speech, web
@@ -337,6 +338,12 @@ def ask(req: AskRequest) -> AskResponse:
     """
     retrieved: list[SearchHit] = []
 
+    # ---- redact personal data before it goes anywhere else — embedding, ------
+    # guardrail scanning, the model itself. Everything below uses `question`,
+    # never `req.question`, so a card/CNP/IBAN/email/phone never leaves this
+    # function intact. See app/pii.py.
+    question, pii_flags = pii.scan_and_redact(req.question)
+
     # ---- which persona, and does it need to be local? ------------------------
     persona_name = req.agent or settings.agent_persona
     mode_requested = (req.agent_mode or settings.agent_mode).lower()
@@ -356,7 +363,8 @@ def ask(req: AskRequest) -> AskResponse:
         if not hosted_only:
             raise HTTPException(status_code=404, detail=str(e))
 
-    # ---- retrieval (unchanged behaviour, now feeding the agent) -------------
+    # ---- retrieval (now feeding the agent, and translated for non-English) -
+    retrieval_query = None
     if req.use_rag:
         _require_qdrant()
         if not store.info()["exists"]:
@@ -364,7 +372,10 @@ def ask(req: AskRequest) -> AskResponse:
                                 detail="use_rag=true but the collection is empty — POST /ingest first, "
                                        "or set use_rag=false for a plain LLM answer.")
         top_k = req.top_k or settings.top_k
-        qvec = _embed([req.question])[0]
+        search_query = retrieval_lang.translate_for_retrieval(question)
+        if search_query != question:
+            retrieval_query = search_query
+        qvec = _embed([search_query])[0]
         retrieved = [SearchHit(**h) for h in store.search(qvec, top_k)]
 
     chunks = [h.model_dump() for h in retrieved]
@@ -372,7 +383,7 @@ def ask(req: AskRequest) -> AskResponse:
     # endpoint returns. The real barrier is the standing rule in the system prompt
     # (persona.py); this is the visible early-warning layer on top of it.
     guardrail_report = GuardrailReport(
-        question_flags=guardrails.scan(req.question),
+        question_flags=guardrails.scan(question),
         context_flags=guardrails.scan_passages(chunks),
     )
     mode = mode_requested
@@ -382,15 +393,17 @@ def ask(req: AskRequest) -> AskResponse:
     # cap is deliberately tighter than "as much as fits" — 10 is still plenty to
     # demonstrate multi-turn continuity in class.
     history = [h.model_dump() for h in req.history[-10:]]
+    for h in history:
+        h["content"], _ = pii.scan_and_redact(h.get("content", ""))
 
     # ---- run the agent ------------------------------------------------------
     try:
         if hosted_only is not None:
-            reply = foundry_agent.run_hosted(hosted_only, req.question, chunks, history=history)
+            reply = foundry_agent.run_hosted(hosted_only, question, chunks, history=history)
         elif mode == "foundry":
-            reply = foundry_agent.run(persona, req.question, chunks, history=history)
+            reply = foundry_agent.run(persona, question, chunks, history=history)
         else:
-            reply = local_agent.run(persona, req.question, chunks,
+            reply = local_agent.run(persona, question, chunks,
                                     temperature=req.temperature, history=history)
     except foundry_agent.FoundryUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -417,9 +430,32 @@ def ask(req: AskRequest) -> AskResponse:
         system_prompt=reply.system_prompt,
         prompt_sent=reply.prompt_sent,
         retrieved=retrieved,
+        retrieval_query=retrieval_query,
         guardrails=guardrail_report,
+        pii=PiiReport(redacted=pii_flags),
         usage=Usage(prompt_tokens=reply.prompt_tokens, completion_tokens=reply.completion_tokens),
     )
+
+
+# --- feedback -------------------------------------------------------------------
+@app.post("/feedback", response_model=FeedbackEntry, tags=["4 · generation"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
+def submit_feedback(req: FeedbackRequest) -> FeedbackEntry:
+    """One thumbs up/down per answer — a place for "was this any good?" to go,
+    and GET /feedback below is how it gets read back (the Status admin view
+    shows the most recent entries)."""
+    entry = feedback_store.record(
+        rating=req.rating, question=req.question, answer=req.answer,
+        agent=req.agent, mode=req.mode, augmented=req.augmented, model=req.model,
+    )
+    return FeedbackEntry(**entry)
+
+
+@app.get("/feedback", response_model=FeedbackListResponse, tags=["4 · generation"])
+def list_feedback(limit: int = Query(50, ge=1, le=200)) -> FeedbackListResponse:
+    """Most recent feedback first."""
+    items = feedback_store.recent(limit=limit)
+    return FeedbackListResponse(count=len(items), items=[FeedbackEntry(**e) for e in items])
 
 
 # --- agents -------------------------------------------------------------------
