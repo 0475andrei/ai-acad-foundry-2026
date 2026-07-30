@@ -137,16 +137,6 @@ class AskRequest(BaseModel):
     agent_mode: Optional[Literal["local", "foundry"]] = Field(
         None, description="local = the loop runs here; foundry = the hosted Agent Service"
     )
-    fact_check: bool = Field(
-        False,
-        description="After answering, verify the answer against the open web and attach a "
-                    "verdict. A second capability, toggled at runtime exactly like use_rag.",
-    )
-    fact_check_urls: list[str] = Field(
-        default_factory=list,
-        description="Check against these pages instead of searching — deterministic, and "
-                    "immune to search rate limits during a demo.",
-    )
 
 
 class AgentInfo(BaseModel):
@@ -246,21 +236,9 @@ class Usage(BaseModel):
     completion_tokens: Optional[int] = None
 
 
-class FactCheckVerdict(BaseModel):
-    verdict: str
-    confidence: str
-    reasoning: str
-    evidence_from: str
-    sources: list[FactCheckSource] = Field(default_factory=list)
-    error: Optional[str] = None
-
-
 class AskResponse(BaseModel):
     answer: str
     augmented: bool
-    fact_check: Optional[FactCheckVerdict] = Field(
-        None, description="Present when fact_check was requested"
-    )
     provider: str
     model: str
     agent: Optional[AgentInfo] = Field(None, description="Which persona shaped this answer")
@@ -314,40 +292,6 @@ class WebSearchResponse(BaseModel):
     count: int
     results: list[WebSearchHit]
     note: Optional[str] = None
-
-
-class FactCheckRequest(BaseModel):
-    model_config = {"json_schema_extra": {"examples": [{
-        "claim": "Azure AI Foundry Agent Service supports tool calling.",
-        "pages": 3,
-    }]}}
-
-    claim: str = Field(..., min_length=1, description="The statement to verify")
-    pages: Optional[int] = Field(None, ge=1, le=5, description="How many results to read in full")
-    urls: list[str] = Field(
-        default_factory=list,
-        description="Check against these pages instead of searching. Use this when you want "
-                    "a deterministic result — a demo that cannot be broken by a rate limit.",
-    )
-
-
-class FactCheckSource(BaseModel):
-    rank: int
-    title: str
-    url: str
-    chars_read: int
-    used: bool = Field(description="Whether the page could actually be read")
-
-
-class FactCheckResponse(BaseModel):
-    claim: str
-    evidence_from: str = Field(description="search provider, or 'supplied urls'")
-    verdict: str = Field(description="supported · contradicted · unclear")
-    confidence: str
-    reasoning: str
-    sources: list[FactCheckSource]
-    prompt_sent: str
-    usage: Optional[Usage] = None
 
 
 class AzureSearchSyncRequest(ChunkRequest):

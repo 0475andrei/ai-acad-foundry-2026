@@ -40,11 +40,10 @@ class Settings(BaseSettings):
     azure_search_index: str = "libra-docs"
     azure_search_key: str = ""               # empty → use the Entra identity instead
 
-    # --- Web search & fact checking --------------------------------------------
+    # --- Web search --------------------------------------------------------------
     search_provider: str = "auto"            # auto | brave | serper | duckduckgo
     search_api_key: str = ""                 # brave or serper key; empty → scraping only
     web_search_results: int = 5
-    fact_check_pages: int = 3                # how many results to actually read
 
     # --- Azure AI Speech (falls back to the Foundry resource when unset) -------
     azure_speech_key: str = ""

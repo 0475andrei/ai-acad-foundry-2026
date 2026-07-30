@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api'
+import { Logo } from './components'
+import { loadSession, logout } from './auth'
+import Login from './views/Login'
 import Agents from './views/Agents'
 import Chat from './views/Chat'
 import Knowledge from './views/Knowledge'
@@ -7,16 +10,18 @@ import Search from './views/Search'
 import Status from './views/Status'
 import Tools from './views/Tools'
 
+// admin sees everything; the "simple user" role only ever gets Chat.
 const VIEWS = [
   { id: 'chat', label: 'Chat', group: 'Assistant' },
-  { id: 'knowledge', label: 'Knowledge', group: 'Pipeline' },
-  { id: 'search', label: 'Retrieval', group: 'Pipeline' },
-  { id: 'agents', label: 'Agents', group: 'Platform' },
-  { id: 'tools', label: 'Tools', group: 'Platform' },
-  { id: 'status', label: 'Status', group: 'Platform' },
+  { id: 'knowledge', label: 'Knowledge', group: 'Pipeline', adminOnly: true },
+  { id: 'search', label: 'Retrieval', group: 'Pipeline', adminOnly: true },
+  { id: 'agents', label: 'Agents', group: 'Platform', adminOnly: true },
+  { id: 'tools', label: 'Tools', group: 'Platform', adminOnly: true },
+  { id: 'status', label: 'Status', group: 'Platform', adminOnly: true },
 ]
 
 export default function App() {
+  const [session, setSession] = useState(() => loadSession())
   const [view, setView] = useState('chat')
   const [agents, setAgents] = useState([])
   const [hostedOnly, setHostedOnly] = useState([])
@@ -40,17 +45,27 @@ export default function App() {
   useEffect(() => { loadAgents(); loadHealth(); loadAzure() }, [loadAgents, loadHealth, loadAzure])
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
 
-  const groups = [...new Set(VIEWS.map((v) => v.group))]
+  const isAdmin = session?.role === 'admin'
+  const visibleViews = VIEWS.filter((v) => isAdmin || !v.adminOnly)
+  const groups = [...new Set(visibleViews.map((v) => v.group))]
   const online = health?.status === 'ok'
+
+  if (!session) return <Login onSignIn={setSession} />
+
+  function signOut() {
+    logout()
+    setSession(null)
+    setView('chat')
+  }
 
   return (
     <div className="app">
       <aside className="side">
-        <p className="brand">Libra Assist<small>console</small></p>
+        <p className="brand"><Logo /><span>Libra Assist<small>console</small></span></p>
         {groups.map((g) => (
           <div key={g}>
             <div className="nav-group">{g}</div>
-            {VIEWS.filter((v) => v.group === g).map((v) => (
+            {visibleViews.filter((v) => v.group === g).map((v) => (
               <button key={v.id} className={`nav-item ${view === v.id ? 'active' : ''}`} onClick={() => setView(v.id)}>
                 <span className="dot" />{v.label}
               </button>
@@ -72,21 +87,32 @@ export default function App() {
               </span>
             </div>
           )}
-          <button className="btn btn-outline btn-sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-            ◐ {theme === 'dark' ? 'light' : 'dark'}
-          </button>
+          <div style={{ marginBottom: '.5rem' }}>
+            <span className="badge muted">{session.username} · {session.role}</span>
+          </div>
+          <div style={{ display: 'flex', gap: '.4rem' }}>
+            <button className="btn btn-outline btn-sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              ◐ {theme === 'dark' ? 'light' : 'dark'}
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={signOut}>sign out</button>
+          </div>
         </div>
       </aside>
 
       <main className="main">
-        {view === 'chat' && <Chat agents={agents} hostedOnly={hostedOnly} foundry={foundry} />}
-        {view === 'knowledge' && <Knowledge />}
-        {view === 'search' && <Search />}
-        {view === 'agents' && <Agents agents={agents} hostedOnly={hostedOnly} foundry={foundry}
-                                      reload={loadAgents} azure={azure} />}
-        {view === 'tools' && <Tools />}
-        {view === 'status' && <Status health={health} reload={loadHealth}
-                                      azure={azure} reloadAzure={loadAzure} />}
+        {/* Chat stays mounted even off-screen, not conditionally rendered like the other
+            views: unmounting it mid-request would drop the answer when it comes back,
+            since the setState that attaches it would land on an instance that's gone. */}
+        <div style={{ display: view === 'chat' ? 'contents' : 'none' }}>
+          <Chat agents={agents} hostedOnly={hostedOnly} foundry={foundry} />
+        </div>
+        {isAdmin && view === 'knowledge' && <Knowledge />}
+        {isAdmin && view === 'search' && <Search />}
+        {isAdmin && view === 'agents' && <Agents agents={agents} hostedOnly={hostedOnly} foundry={foundry}
+                                                  reload={loadAgents} azure={azure} />}
+        {isAdmin && view === 'tools' && <Tools />}
+        {isAdmin && view === 'status' && <Status health={health} reload={loadHealth}
+                                                  azure={azure} reloadAzure={loadAzure} />}
       </main>
     </div>
   )

@@ -3,6 +3,21 @@ import { api } from './api'
 import { startRecording } from './speech'
 
 
+/** The Libra monogram — circle, black serif stem, red "B", a small swoosh.
+ * Inline SVG rather than a raster asset: crisp at any size, no file to ship. */
+export function Logo({ size = 30 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" style={{ flex: '0 0 auto' }}>
+      <circle cx="48" cy="50" r="38" fill="none" stroke="currentColor" strokeWidth="6" />
+      <text x="38" y="70" fontFamily="Georgia, 'Times New Roman', serif" fontSize="56"
+            fontWeight="700" fill="currentColor" textAnchor="middle">I</text>
+      <text x="63" y="70" fontFamily="Georgia, 'Times New Roman', serif" fontSize="56"
+            fontWeight="700" fill="var(--c-crimson)" textAnchor="middle">B</text>
+      <path d="M 82 68 Q 94 76 80 86" stroke="currentColor" strokeWidth="6" fill="none" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function Head({ title, children }) {
   return (
     <div className="head">
