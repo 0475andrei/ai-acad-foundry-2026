@@ -83,7 +83,8 @@ export default function App() {
                               onSelect={convo.setActiveId} onNew={convo.startNew}
                               onImportClick={convo.importClick} fileInputRef={convo.fileInputRef}
                               onImportFile={convo.importFile} onExport={exportConversation}
-                              onDelete={convo.deleteConversation} onRename={convo.renameConversation} />
+                              onDelete={convo.deleteConversation} onRename={convo.renameConversation}
+                              locale="ro" />
           </div>
         )}
         <div className="side-foot">
@@ -106,9 +107,11 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', gap: '.4rem' }}>
             <button className="btn btn-outline btn-sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-              ◐ {theme === 'dark' ? 'light' : 'dark'}
+              ◐ {isAdmin
+                ? (theme === 'dark' ? 'light' : 'dark')
+                : (theme === 'dark' ? 'luminos' : 'întunecat')}
             </button>
-            <button className="btn btn-outline btn-sm" onClick={signOut}>sign out</button>
+            <button className="btn btn-outline btn-sm" onClick={signOut}>{isAdmin ? 'sign out' : 'ieși din cont'}</button>
           </div>
         </div>
       </aside>

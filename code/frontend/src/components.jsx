@@ -18,6 +18,175 @@ export function Logo({ size = 30 }) {
   )
 }
 
+// LIviu BRAdu — capitalized that way on purpose (LI + BRA = LIBRA) — the "simple
+// user" role's face while a grounded answer is being retrieved. An 8-bit sprite,
+// not an image file: each row below is one line of a pixel grid ('.' =
+// transparent), matching how Logo above is inline SVG rather than a shipped
+// asset. Row width is fixed at 18 — every row must stay that long or the grid
+// skews. Two full grids, not one grid plus a diff: SEARCH and EUREKA are
+// identical below the shoulders (row 14 down — desk, book, torso) and differ
+// only in a single arm column (index 16) and one spark pixel (index 17, row 0),
+// which is simpler to keep correct by eye than reconstructing an overlay.
+const TELLER_PALETTE = {
+  H: '#1b1f2e',   // hair
+  S: '#a9704f',   // skin
+  D: '#3a2415',   // eyes / mustache
+  W: '#f2ede4',   // shirt
+  V: '#232a45',   // vest / sleeve
+  C: '#8a5a34',   // desk
+  K: '#5c3b20',   // desk shadow
+  P: '#d9b878',   // book page
+  E: '#5c3b20',   // book spine
+  T: '#3aa0a0',   // page mid-turn highlight
+  Y: '#eea23e',   // "idea" spark
+}
+
+// Paging through the book, arm resting.
+const TELLER_SEARCH_ROWS = [
+  '......HHHHHH......',
+  '.....HHHHHHHH.....',
+  '.....HHHHHHHH.....',
+  '.....HSSSSSSH.....',
+  '.....SSSSSSSS.....',
+  '.....SDDSSDDS.....',
+  '.....SDDSSDDS.....',
+  '.....SSSSSSSS.....',
+  '.....SSDDDDSS.....',
+  '......SDDDDS......',
+  '.......SSSS.......',
+  '..VVWWWWWWWWWWVV..',
+  '..VVVVWWWWWWVVVV..',
+  '..VVVVVWWWWVVVVV..',
+  'VVVVVVVVVVVVVVVVVV',
+  'SSVVVVVVVVVVVVVVSS',
+  'KKKKKKKKKKKKKKKKKK',
+  'CCCCPPPPEEPPPPCCCC',
+  'CCCCPPPTEEPPPPCCCC',
+  'CCCCPPPPEEPPPPCCCC',
+  'CCCCCCCCCCCCCCCCCC',
+  'KKKKKKKKKKKKKKKKKK',
+]
+
+// Same figure — arm raised straight up along column 16, ending in a fingertip
+// with an "idea" spark above his head. Attaches cleanly at the shoulder (row
+// 14, already solid) with no gap, and never crosses the face (columns 5-12).
+const TELLER_EUREKA_ROWS = [
+  '......HHHHHH.....Y',
+  '.....HHHHHHHH...S.',
+  '.....HHHHHHHH...S.',
+  '.....HSSSSSSH...S.',
+  '.....SSSSSSSS...S.',
+  '.....SDDSSDDS...S.',
+  '.....SDDSSDDS...S.',
+  '.....SSSSSSSS...S.',
+  '.....SSDDDDSS...S.',
+  '......SDDDDS....V.',
+  '.......SSSS.....V.',
+  '..VVWWWWWWWWWWVVV.',
+  '..VVVVWWWWWWVVVVV.',
+  '..VVVVVWWWWVVVVVV.',
+  'VVVVVVVVVVVVVVVVVV',
+  'SSVVVVVVVVVVVVVVSS',
+  'KKKKKKKKKKKKKKKKKK',
+  'CCCCPPPPEEPPPPCCCC',
+  'CCCCPPPTEEPPPPCCCC',
+  'CCCCPPPPEEPPPPCCCC',
+  'CCCCCCCCCCCCCCCCCC',
+  'KKKKKKKKKKKKKKKKKK',
+]
+const TELLER_PIXEL = 6
+
+// The hand-drawn fallback — used only when the real photo for this phase (see
+// LibraTeller below) isn't in public/ yet, or fails to load. Kept, not deleted:
+// this way there's never a broken/blank state, just a lower-fidelity one.
+function PixelTeller({ phase = 'searching', caption: captionOverride, pixel = TELLER_PIXEL }) {
+  const rows = phase === 'eureka' ? TELLER_EUREKA_ROWS : TELLER_SEARCH_ROWS
+  const caption = captionOverride ?? (phase === 'eureka'
+    ? 'LIviu BRAdu a găsit!'
+    : 'LIviu BRAdu caută prin dosare…')
+  const width = rows[0].length * pixel
+  const height = rows.length * pixel
+
+  // The book (rows 17-19) is grouped in its own <g> so it can tilt as one
+  // rigid piece — a rotation only reads as "the book moved" if every one of
+  // its pixels shares a single transform-origin, which individual per-rect
+  // classes can't give it. translateY (the head bob) doesn't have that
+  // problem: every rect moving the same amount looks identical to a real
+  // group, so those stay plain rects with a shared class.
+  const bodyRects = []
+  const bookRects = []
+  rows.forEach((row, y) => {
+    ;[...row].forEach((ch, x) => {
+      if (ch === '.') return
+      const isEye = phase === 'searching' && (y === 5 || y === 6) &&
+                    (x === 6 || x === 7 || x === 10 || x === 11)
+      const isHead = y <= 10 && x <= 13 && !isEye
+      const isPageTurn = phase === 'searching' && ch === 'T'
+      const isSpark = phase === 'eureka' && ch === 'Y'
+      const cls = [isEye && 'teller-eye', isHead && 'teller-head',
+                   isPageTurn && 'teller-page', isSpark && 'teller-spark']
+        .filter(Boolean).join(' ') || undefined
+      const rect = (
+        <rect key={`${y}-${x}`} x={x * pixel} y={y * pixel}
+              width={pixel} height={pixel} fill={TELLER_PALETTE[ch]}
+              className={cls} />
+      )
+      ;(y >= 17 && y <= 19 ? bookRects : bodyRects).push(rect)
+    })
+  })
+
+  return (
+    <div className={`teller${phase === 'eureka' ? ' teller-eureka' : ''}`}>
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}
+           shapeRendering="crispEdges" role="img" aria-label="Asistentul caută în documentație">
+        {bodyRects}
+        <g className={phase === 'searching' ? 'teller-book-group' : undefined}>{bookRects}</g>
+      </svg>
+      <p className="teller-caption">{caption}</p>
+    </div>
+  )
+}
+
+// The real art, when it exists. public/ is served at the site root as-is (not
+// bundled), so a missing file here is just a 404 on this one <img> — caught by
+// onError, never a build failure — rather than something that could break the
+// dev server before the photos are ever added.
+const TELLER_PHOTOS = {
+  searching: '/teller-reading.gif',
+  eureka: '/teller-eureka.gif',
+  // A still photo, not a loop — this is the calm "before you've asked anything"
+  // pose, shown once per empty conversation, not tied to a request in flight.
+  greeting: '/teller-greeting.png',
+}
+
+export function LibraTeller({ phase = 'searching', caption: captionOverride, compact = false }) {
+  // Tracked per phase, not as one flag: the photos are separate files, and one
+  // going missing shouldn't sink the others back to the pixel sprite too.
+  const [failed, setFailed] = useState({})
+  // caption is overridable — the new-chat greeting reuses the "searching" GIF's
+  // page-flipping loop (he's got the whole book ready) but with its own line
+  // instead of the mid-request "searching…" caption.
+  const caption = captionOverride ?? (phase === 'eureka'
+    ? 'LIviu BRAdu a găsit!'
+    : 'LIviu BRAdu caută prin dosare…')
+
+  if (failed[phase]) return <PixelTeller phase={phase} caption={caption} pixel={compact ? 3 : TELLER_PIXEL} />
+
+  return (
+    <div className={`teller teller-photo${phase === 'eureka' ? ' teller-eureka' : ''}${compact ? ' teller-compact' : ''}`}>
+      {/* The motion (bob, pop, brightness flash) is baked into the GIF's own frames —
+          generated from these same reference photos — so no CSS transform is layered
+          on top here; that avoided fighting/doubling up with the animation already
+          inside the file. The greeting photo is static, so it gets its own gentle
+          CSS idle bob instead (see .teller-greeting-idle). */}
+      <img key={phase} src={TELLER_PHOTOS[phase]} alt="LIviu BRAdu"
+           className={phase === 'greeting' ? 'teller-greeting-idle' : undefined}
+           onError={() => setFailed((f) => ({ ...f, [phase]: true }))} />
+      <p className="teller-caption">{caption}</p>
+    </div>
+  )
+}
+
 export function Head({ title, children }) {
   return (
     <div className="head">
@@ -65,11 +234,20 @@ export function RunsOnBadge({ runsOn, reason }) {
   return <span className={`badge ${s.tone}`} title={runsOn === 'unknown' && reason ? reason : s.hint}>{s.label}</span>
 }
 
+const CONVO_LIST_STRINGS = {
+  en: { newChat: '+ new chat', import: 'import', importTitle: 'Import a conversation exported as JSON',
+        rename: 'Rename this chat', export: 'Export this chat as JSON', del: 'Delete this chat' },
+  ro: { newChat: '+ conversație nouă', import: 'import', importTitle: 'Importă o conversație exportată ca JSON',
+        rename: 'Redenumește', export: 'Exportă ca JSON', del: 'Șterge conversația' },
+}
+
 /** The chat-history list: new/import controls plus the conversation rows. Rendered
  * inside the Chat view for admins, or inside the app's own left rail for the
  * single-agent "user" role — same list, two different homes depending on isAdmin. */
 export function ConversationList({ conversations, activeId, onSelect, onNew, onImportClick,
-                                    fileInputRef, onImportFile, onExport, onDelete, onRename }) {
+                                    fileInputRef, onImportFile, onExport, onDelete, onRename,
+                                    locale = 'en' }) {
+  const s = CONVO_LIST_STRINGS[locale] || CONVO_LIST_STRINGS.en
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
   // Escape must not save. Removing the input on keydown lets the browser fire blur
@@ -90,11 +268,11 @@ export function ConversationList({ conversations, activeId, onSelect, onNew, onI
     <>
       <div style={{ display: 'flex', gap: '.4rem', marginBottom: '.6rem' }}>
         <button className="btn btn-primary btn-sm" style={{ flex: 1 }} onClick={onNew}>
-          + new chat
+          {s.newChat}
         </button>
-        <button className="btn btn-outline btn-sm" title="Import a conversation exported as JSON"
+        <button className="btn btn-outline btn-sm" title={s.importTitle}
                 onClick={onImportClick}>
-          import
+          {s.import}
         </button>
       </div>
       <input ref={fileInputRef} type="file" accept="application/json,.json"
@@ -120,16 +298,16 @@ export function ConversationList({ conversations, activeId, onSelect, onNew, onI
                 <span className="convo-title" title={c.title}>{c.title}</span>
               )}
               {!editing && (
-                <button className="convo-rename" title="Rename this chat"
+                <button className="convo-rename" title={s.rename}
                         onClick={(e) => { e.stopPropagation(); startRename(c) }}>
                   ✎
                 </button>
               )}
-              <button className="convo-export" title="Export this chat as JSON"
+              <button className="convo-export" title={s.export}
                       onClick={(e) => { e.stopPropagation(); onExport(c) }}>
                 ↓
               </button>
-              <button className="convo-del" title="Delete this chat"
+              <button className="convo-del" title={s.del}
                       onClick={(e) => { e.stopPropagation(); onDelete(c.id) }}>
                 ×
               </button>

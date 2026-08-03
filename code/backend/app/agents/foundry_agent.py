@@ -268,7 +268,8 @@ def run(
             f"Deploy it first — POST /agents/{persona.name}/deploy, or "
             f"`python scripts/deploy_agent.py {persona.name}`."
         )
-    return _run_thread(agent_id, persona.name, question, chunks or [], history or [])
+    return _run_thread(agent_id, persona.name, question, chunks or [], history or [],
+                       max_tokens=persona.max_tokens)
 
 
 def run_hosted(agent: dict, question: str, chunks: list[dict] | None = None,
@@ -279,7 +280,7 @@ def run_hosted(agent: dict, question: str, chunks: list[dict] | None = None,
 
 
 def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[dict],
-                 history: list[dict] | None = None) -> AgentReply:
+                 history: list[dict] | None = None, max_tokens: int | None = None) -> AgentReply:
     """The Agent Service protocol, in four calls.
 
     We open a fresh thread per call rather than keeping one alive across turns —
@@ -287,13 +288,17 @@ def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[di
     so there is nowhere to post prior assistant replies anyway. Continuity comes
     from folding `history` into the prompt text instead, same as the local agent.
 
-    Known gap, not a bug: unlike local_agent.py (see reasoning_extras() in llm.py),
-    this run body sends no model-tuning parameters at all — no reasoning_effort
-    equivalent, nothing. Whether the Create Run REST operation at this api-version
-    even accepts one is unconfirmed (deliberately not guessed at here — see the
-    module docstring on why this file speaks raw REST rather than a moving SDK
-    surface); a hosted gpt-5-family agent has no way to control reasoning effort
-    through this codebase today. Local mode does; Foundry mode does not.
+    Known gap, not fully closed: unlike local_agent.py (see reasoning_extras() in
+    llm.py), this run body has no way to cap reasoning_effort — whether the Create
+    Run operation at this api-version even accepts that field is unconfirmed
+    (deliberately not guessed at — see the module docstring on why this file speaks
+    raw REST rather than a moving SDK surface). What IS stable, documented Assistants
+    API surface — and what this now sets — is `max_completion_tokens` on the run
+    itself: without it, a reasoning model can spend its whole (server-side default)
+    budget on hidden reasoning and the run ends as status "incomplete" with an
+    `incomplete_details` reason, not a `last_error` — which is why that status used
+    to come back from this function as "no detail" even though the API did explain
+    itself, just under a field this code wasn't reading.
     """
     user = build_user_prompt(question, chunks, history)
 
@@ -302,7 +307,8 @@ def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[di
     _call("POST", f"threads/{thread_id}/messages",
           {"role": "user", "content": user})                                 # 2 ask
     run_obj = _call("POST", f"threads/{thread_id}/runs",
-                    {"assistant_id": agent_id})                              # 3 execute
+                    {"assistant_id": agent_id,
+                     "max_completion_tokens": max_tokens or settings.llm_max_tokens})  # 3 execute
 
     deadline = time.time() + 180
     while run_obj.get("status") in ("queued", "in_progress", "requires_action"):
@@ -316,9 +322,13 @@ def _run_thread(agent_id: str, persona_name: str, question: str, chunks: list[di
         run_obj = _call("GET", f"threads/{thread_id}/runs/{run_obj['id']}")
 
     if run_obj.get("status") != "completed":
-        raise FoundryUnavailable(
-            f"The run ended as '{run_obj.get('status')}': {run_obj.get('last_error') or 'no detail'}"
-        )
+        # "incomplete" carries its reason in `incomplete_details`, not `last_error`
+        # (that field is only populated for status="failed") — check both rather
+        # than reporting "no detail" for a status that did explain itself.
+        detail = (run_obj.get("last_error")
+                  or run_obj.get("incomplete_details")
+                  or "no detail")
+        raise FoundryUnavailable(f"The run ended as '{run_obj.get('status')}': {detail}")
 
     messages = _call("GET", f"threads/{thread_id}/messages")                 # 4 read
     answer = ""

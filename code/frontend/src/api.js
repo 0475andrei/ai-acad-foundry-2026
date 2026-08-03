@@ -42,6 +42,10 @@ export const api = {
 
   azure: () => request('/azure'),
 
+  loanPayment: (payload) => request('/tools/loan-payment', { method: 'POST', body: payload }),
+  loanPayoff: (payload) => request('/tools/loan-payoff', { method: 'POST', body: payload }),
+  savingsGrowth: (payload) => request('/tools/savings-growth', { method: 'POST', body: payload }),
+
   webFetch: (payload) => request('/tools/web-fetch', { method: 'POST', body: payload }),
   speak: (payload) => request('/tools/speak', { method: 'POST', body: payload, raw: true }),
   transcribe: async (file) => {

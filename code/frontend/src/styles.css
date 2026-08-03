@@ -164,6 +164,57 @@ pre.out { background: var(--code-bg); border: 1px solid var(--border); border-ra
 .msg.user { align-self: flex-end; background: var(--grad-accent); color: #fff; }
 .msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); }
 .msg.err { align-self: flex-start; background: rgba(211,56,43,.1); border: 1px solid var(--c-crimson); }
+
+.teller { align-self: center; display: flex; flex-direction: column; align-items: center; gap: .5rem; padding: .4rem 0 .2rem; }
+.teller svg { image-rendering: pixelated; filter: drop-shadow(0 6px 14px rgba(0,0,0,.18)); }
+.teller-caption { margin: 0; font-size: .82rem; font-style: italic; color: var(--text-muted); }
+
+/* The whole head drifts up and down together — a shared class on every head
+   pixel, not a <g>: translateY needs no common transform-origin to look unified. */
+@keyframes teller-head-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2.5px); } }
+.teller-head { animation: teller-head-bob 2.1s ease-in-out infinite; }
+
+/* A real blink, not a glance: the eye pixels swap all the way to skin tone and
+   back, held with steps() so the color snaps instead of smearing through the
+   in-between hues a normal eased color transition would produce. */
+@keyframes teller-blink { 0%, 84%, 100% { fill: #3a2415; } 88%, 96% { fill: #a9704f; } }
+.teller-eye { animation: teller-blink 2.8s steps(1) infinite; }
+
+@keyframes teller-page-turn { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(2px, -1px) rotate(6deg); } }
+.teller-page { animation: teller-page-turn .9s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+
+/* The book's own <g> (see LibraTeller) — one rigid rotation for every pixel
+   in it at once, hinged near the spine so it reads as a book tilting, not a
+   block sliding. */
+@keyframes teller-book-tilt { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-5deg); } 75% { transform: rotate(5deg); } }
+.teller-book-group { animation: teller-book-tilt 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: 30% 100%; }
+
+@keyframes teller-spark { 0%, 100% { opacity: .45; transform: scale(1); } 50% { opacity: 1; transform: scale(1.9); } }
+.teller-spark { animation: teller-spark .4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+
+/* The eureka pose's one-shot entrance — a quick overshoot-and-settle so the
+   moment the answer lands reads as a small "aha", not just a silent pose swap. */
+@keyframes teller-pop { 0% { transform: scale(.8) rotate(-5deg); } 55% { transform: scale(1.12) rotate(3deg); } 100% { transform: scale(1) rotate(0deg); } }
+.teller-eureka svg { animation: teller-pop .5s cubic-bezier(.34,1.56,.64,1); }
+
+/* The real-photo path (see LibraTeller / TELLER_PHOTOS) — animated GIFs generated
+   from the reference photos, motion baked into the frames themselves, so this is
+   just static sizing/shadow, no transform keyframes layered on top. */
+.teller-photo img { display: block; width: min(260px, 70vw); height: auto; border-radius: var(--r-lg);
+                     filter: drop-shadow(0 8px 18px rgba(0,0,0,.22)); }
+
+/* The still greeting photo (no baked-in motion, unlike the GIFs above) gets its
+   own subtle CSS breathing so the empty-conversation card isn't totally static. */
+@keyframes teller-greeting-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.teller-greeting-idle { animation: teller-greeting-bob 2.4s ease-in-out infinite; }
+
+/* The compact strip shown above the composer once a conversation is under way —
+   same character, laid out as a small inline row instead of the big centered
+   card, so it reads as a status line rather than taking over the screen. */
+.teller-compact { flex-direction: row; align-items: center; justify-content: flex-start;
+                   gap: .5rem; padding: .2rem 0; }
+.teller-compact img { width: 120px !important; border-radius: var(--r-md); }
+.teller-compact .teller-caption { font-size: .88rem; }
 .msg-meta { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-top: .65rem; padding-top: .6rem; border-top: 1px solid var(--border); }
 .vote-group { display: inline-flex; gap: .2rem; margin-left: auto; }
 .vote-btn { background: none; border: 0; cursor: pointer; font-size: .95rem; line-height: 1; padding: .25em .4em; border-radius: var(--r-pill); opacity: .55; transition: opacity .15s var(--ease), background .15s var(--ease); }

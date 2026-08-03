@@ -59,6 +59,7 @@ services:
       - ../frontend/src:/srv/src              # live reload: edit locally, HMR in the browser
       - ../frontend/index.html:/srv/index.html
       - ../frontend/vite.config.js:/srv/vite.config.js   # proxy routes, without a rebuild
+      - ../frontend/public:/srv/public        # static assets (images, etc.) without a rebuild
     # deliberately NO depends_on: the console probes for the API at startup, so it
     # works whether the API runs beside it in compose or on your machine under uv.
     # Declaring a dependency would drag the API container up even when you wanted

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { ConversationList, Err, RunsOnBadge, SpeakButton, MicButton } from '../components'
+import { ConversationList, Err, LibraTeller, RunsOnBadge, SpeakButton, MicButton } from '../components'
 import { titleFrom, exportConversation } from '../conversations'
 
 // The "simple user" role always talks to the same persona over the same lane, so
@@ -12,6 +12,55 @@ const USER_DEFAULT_MODE = 'foundry'
 // skip the call rather than asking it to rewrite three words.
 const SUGGEST_MIN_CHARS = 12
 const SUGGEST_DEBOUNCE_MS = 900
+
+// The "simple user" role's whole chat surface is in Romanian; admin stays English
+// (it's the technical pipeline-explorer console, unlike the plain customer-facing
+// chat). Everything not covered here — backend badges like "grounded"/model
+// names/guardrail category labels — is either dynamic content from the API or
+// jargon-shaped enough (top-k, temp) that it isn't natural-language prose to begin
+// with, so it's left as-is rather than half-translated.
+function uiStrings(isAdmin) {
+  return isAdmin ? {
+    clear: 'clear', newChatTitle: 'New chat',
+    welcomeBody: 'Ask a question about the documents you have ingested. Switch the persona '
+                + 'to change how it answers, or turn RAG off to see the model answer without grounding.',
+    guardrailFlag: '⚠ guardrail flag',
+    piiRedacted: '🔒 personal data redacted',
+    piiTooltip: (kinds) => `Redacted before the model saw it: ${kinds}`,
+    goodAnswer: 'Good answer', notHelpful: 'Not helpful',
+    searchedUsing: 'searched using:',
+    retrievalTooltip: 'The question was translated to English for document search only — the '
+                      + 'answer above was generated from what you actually asked.',
+    sources: (n) => `${n} retrieved passage${n > 1 ? 's' : ''}`,
+    exactPrompt: 'the exact prompt that was sent',
+    requestFailed: 'Request failed:',
+    suggestHeading: 'did you mean to write this?', useThis: 'use this', keepMine: 'keep mine',
+    placeholder: 'Ask Libra Assist…  (Enter to send, Shift+Enter for a new line)',
+    send: 'Send',
+    personaFallback: 'Andrei’s Product Specialist',
+  } : {
+    clear: 'golește', newChatTitle: 'Conversație nouă',
+    welcomeBody: 'Pune o întrebare despre documentele încărcate. Răspunsul e tradus automat, '
+                + 'indiferent în ce limbă întrebi.',
+    greetingCaption: 'Salut, sunt LIviu BRAdu!',
+    greetingBody: 'Sunt aici să te ajut cu întrebări despre conturi, carduri, credite și dobânzi '
+                + 'la Libra Bank. Ce vrei să afli?',
+    guardrailFlag: '⚠ posibilă tentativă suspectă',
+    piiRedacted: '🔒 date personale ascunse',
+    piiTooltip: (kinds) => `Ascunse înainte ca modelul să le vadă: ${kinds}`,
+    goodAnswer: 'Răspuns bun', notHelpful: 'Nu a ajutat',
+    searchedUsing: 'căutare folosind:',
+    retrievalTooltip: 'Întrebarea a fost tradusă în engleză doar pentru căutarea în documente — '
+                      + 'răspunsul de mai sus a fost generat chiar din ce ai întrebat.',
+    sources: (n) => `${n} pasaj${n > 1 ? 'e' : ''} găsit${n > 1 ? 'e' : ''}`,
+    exactPrompt: 'promptul exact trimis',
+    requestFailed: 'Cerere eșuată:',
+    suggestHeading: 'ai vrut să scrii asta?', useThis: 'folosește asta', keepMine: 'păstrează ce am scris',
+    placeholder: 'Întreabă Libra Assist…  (Enter pentru a trimite, Shift+Enter pentru rând nou)',
+    send: 'Trimite',
+    personaFallback: 'Specialistul Andrei în produse',
+  }
+}
 
 // Turns the backend's guardrail report into one tooltip string, or null when clean.
 // Flags are informational, not a block — the answer still went through — this is
@@ -31,6 +80,7 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
           startNew, deleteConversation, renameConversation, fileInputRef, importClick,
           importFile, importError } = convo
   const messages = active.messages
+  const t = uiStrings(isAdmin)
 
   const [question, setQuestion] = useState('')
   const [agent, setAgent] = useState(() => (isAdmin ? 'default' : USER_DEFAULT_AGENT))
@@ -90,10 +140,22 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
     }).catch((e) => console.warn('feedback failed:', e.message))
   }
 
+  // LIviu BRAdu's pose while a "user"-role, RAG-grounded question is in flight:
+  // 'searching' (paging the book) for the wait, then a one-shot 'eureka' (raised
+  // finger) once the answer lands, then gone — independent of `busy`, which
+  // drops the instant the fetch resolves, well before the eureka beat should end.
+  // The sequence ref exists only so a fast second question doesn't get its
+  // "searching" pose cut short by a still-pending timeout from the previous one.
+  const [tellerPhase, setTellerPhase] = useState(null)
+  const tellerSeq = useRef(0)
+
   async function send() {
     const text = question.trim()
     if (!text || busy) return
     setQuestion(''); setError(null); setBusy(true)
+    const seq = ++tellerSeq.current
+    const showTeller = !isAdmin && useRag
+    if (showTeller) setTellerPhase('searching')
     const history = messages
       .filter((m) => m.role === 'user' || m.role === 'bot')
       .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.role === 'user' ? m.text : m.data.answer }))
@@ -103,9 +165,16 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
       const data = await api.ask({ question: text, use_rag: useRag, top_k: Number(topK),
                                   agent, agent_mode: mode, history })
       setMessages((m) => [...m, { role: 'bot', data }])
+      if (showTeller) {
+        setTellerPhase('eureka')
+        // matches the eureka GIF's own hold time (see teller-eureka.gif generation):
+        // long enough to actually read the pose, not just glimpse it mid-motion.
+        setTimeout(() => { if (seq === tellerSeq.current) setTellerPhase(null) }, 2000)
+      }
     } catch (e) {
       setMessages((m) => [...m, { role: 'err', text: e.message }])
       setError(e.message)
+      if (showTeller) setTellerPhase(null)
     } finally { setBusy(false) }
   }
 
@@ -142,7 +211,7 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
           <ConversationList conversations={conversations} activeId={activeId} onSelect={setActiveId}
                             onNew={startNew} onImportClick={importClick} fileInputRef={fileInputRef}
                             onImportFile={importFile} onExport={exportConversation} onDelete={deleteConversation}
-                            onRename={renameConversation} />
+                            onRename={renameConversation} locale="en" />
         </aside>
       )}
 
@@ -176,8 +245,8 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
             </select>
           </>
         ) : (
-          <span className="badge" title={current?.description || 'Andrei’s Product Specialist'}>
-            {current?.display_name || 'Andrei’s Product Specialist'}
+          <span className="badge" title={current?.description || t.personaFallback}>
+            {current?.display_name || t.personaFallback}
           </span>
         )}
         <span className="badge muted" style={{ gap: '.35rem' }} title="Passages to retrieve">
@@ -192,26 +261,34 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
           </span>
         )}
         <button className="btn btn-outline btn-sm"
-                onClick={() => updateActive((c) => ({ ...c, messages: [], title: 'New chat' }))}>
-          clear
+                onClick={() => updateActive((c) => ({ ...c, messages: [], title: t.newChatTitle }))}>
+          {t.clear}
         </button>
         {current && <span className="badge muted" title={current.description}>temp {current.temperature ?? '—'}</span>}
       </div>
 
       <div className="msgs">
         {messages.length === 0 && (
-          <div className="card" style={{ margin: 'auto', maxWidth: '46rem', textAlign: 'center' }}>
-            <h3>Libra Assist</h3>
-            <p className="muted" style={{ margin: 0 }}>
-              Ask a question about the documents you have ingested. Switch the persona to change how
-              it answers, or turn RAG off to see the model answer without grounding.
-            </p>
-          </div>
+          isAdmin ? (
+            <div className="card" style={{ margin: 'auto', maxWidth: '46rem', textAlign: 'center' }}>
+              <h3>Libra Assist</h3>
+              <p className="muted" style={{ margin: 0 }}>{t.welcomeBody}</p>
+            </div>
+          ) : (
+            // Every new/empty conversation opens on LIviu BRAdu introducing himself —
+            // reuses the same page-flipping GIF as the mid-request "searching" pose
+            // (he already has the book open), just with his own line instead of
+            // "caută prin dosare…".
+            <div className="card" style={{ margin: 'auto', maxWidth: '32rem', textAlign: 'center' }}>
+              <LibraTeller phase="greeting" caption={t.greetingCaption} />
+              <p className="muted" style={{ margin: '.6rem 0 0' }}>{t.greetingBody}</p>
+            </div>
+          )
         )}
 
         {messages.map((m, i) => {
           if (m.role === 'user') return <div className="msg user" key={i}>{m.text}</div>
-          if (m.role === 'err') return <div className="msg err" key={i}><strong>Request failed:</strong> {m.text}</div>
+          if (m.role === 'err') return <div className="msg err" key={i}><strong>{t.requestFailed}</strong> {m.text}</div>
           const d = m.data
           const guardrailHit = describeGuardrails(d.guardrails)
           return (
@@ -223,29 +300,29 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
                 <span className="badge muted">{d.agent?.mode}</span>
                 <span className="badge muted">{d.model}</span>
                 {d.usage && <span className="badge muted">{d.usage.prompt_tokens} {d.usage.completion_tokens} tokens</span>}
-                {guardrailHit && <span className="badge crimson" title={guardrailHit}>⚠ guardrail flag</span>}
+                {guardrailHit && <span className="badge crimson" title={guardrailHit}>{t.guardrailFlag}</span>}
                 {d.pii?.redacted?.length > 0 && (
-                  <span className="badge crimson" title={`Redacted before the model saw it: ${d.pii.redacted.join(', ')}`}>
-                    🔒 personal data redacted
+                  <span className="badge crimson" title={t.piiTooltip(d.pii.redacted.join(', '))}>
+                    {t.piiRedacted}
                   </span>
                 )}
                 <SpeakButton text={d.answer} />
                 <span className="vote-group">
                   <button className={`vote-btn ${m.vote === 'up' ? 'vote-up-active' : ''}`}
-                          title="Good answer" onClick={() => voteOn(i, 'up')}>👍</button>
+                          title={t.goodAnswer} onClick={() => voteOn(i, 'up')}>👍</button>
                   <button className={`vote-btn ${m.vote === 'down' ? 'vote-down-active' : ''}`}
-                          title="Not helpful" onClick={() => voteOn(i, 'down')}>👎</button>
+                          title={t.notHelpful} onClick={() => voteOn(i, 'down')}>👎</button>
                 </span>
               </div>
               {d.retrieval_query && (
                 <div className="muted" style={{ fontSize: '.78rem', marginTop: '.4rem' }}
-                     title="The question was translated to English for document search only — the answer above was generated from what you actually asked.">
-                  searched using: <em>{d.retrieval_query}</em>
+                     title={t.retrievalTooltip}>
+                  {t.searchedUsing} <em>{d.retrieval_query}</em>
                 </div>
               )}
               {d.retrieved?.length > 0 && (
                 <details className="sources">
-                  <summary>{d.retrieved.length} retrieved passage{d.retrieved.length > 1 ? 's' : ''}</summary>
+                  <summary>{t.sources(d.retrieved.length)}</summary>
                   {d.retrieved.map((h, j) => (
                     <div className="src" key={h.id}>
                       <span className="score">[{j + 1}] score {h.score.toFixed(4)}</span>
@@ -255,35 +332,39 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
                 </details>
               )}
               <details className="sources">
-                <summary>the exact prompt that was sent</summary>
+                <summary>{t.exactPrompt}</summary>
                 <pre className="out" style={{ marginTop: '.4rem' }}>{`SYSTEM:\n${d.system_prompt}\n\nUSER:\n${d.prompt_sent}`}</pre>
               </details>
             </div>
           )
         })}
-        {busy && <div className="msg bot"><span className="spin" /> thinking…</div>}
+        {(isAdmin || !useRag) && busy && <div className="msg bot"><span className="spin" /> thinking…</div>}
         <div ref={endRef} />
       </div>
 
       <Err error={error || importError} />
+      {/* Once the greeting card is gone (first message sent), the searching/eureka
+          indicator moves here — a small status line above the composer instead of
+          taking over the middle of the screen on every request. */}
+      {!isAdmin && tellerPhase && <LibraTeller phase={tellerPhase} compact />}
       <div className="composer">
         {suggestion && (
           <div className="suggest-popup">
             <div className="suggest-text">
-              <strong>did you mean to write this?</strong>
+              <strong>{t.suggestHeading}</strong>
               {suggestion}
             </div>
             <div className="suggest-actions">
-              <button className="btn btn-primary btn-sm" onClick={acceptSuggestion}>use this</button>
-              <button className="btn btn-outline btn-sm" onClick={() => setSuggestion(null)}>keep mine</button>
+              <button className="btn btn-primary btn-sm" onClick={acceptSuggestion}>{t.useThis}</button>
+              <button className="btn btn-outline btn-sm" onClick={() => setSuggestion(null)}>{t.keepMine}</button>
             </div>
           </div>
         )}
-        <textarea value={question} placeholder={"Ask Libra Assist\u2026  (Enter to send, Shift+Enter for a new line)"}
+        <textarea value={question} placeholder={t.placeholder}
                   onChange={(e) => setQuestion(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-        <MicButton onText={(t) => setQuestion((q) => (q ? `${q} ${t}` : t))} disabled={busy} />
-        <button className="btn btn-primary" onClick={send} disabled={busy || !question.trim()}>Send</button>
+        <MicButton onText={(spoken) => setQuestion((q) => (q ? `${q} ${spoken}` : spoken))} disabled={busy} />
+        <button className="btn btn-primary" onClick={send} disabled={busy || !question.trim()}>{t.send}</button>
       </div>
       </div>
     </div>

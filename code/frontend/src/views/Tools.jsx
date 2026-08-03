@@ -11,6 +11,23 @@ export default function Tools() {
   const [audio, setAudio] = useState(null)
   const [transcript, setTranscript] = useState(null)
 
+  // --- banking calculators (plain math, see app/finance.py — no LLM involved) --
+  const [loanPrincipal, setLoanPrincipal] = useState('80000')
+  const [loanRate, setLoanRate] = useState('6.5')
+  const [loanYears, setLoanYears] = useState('30')
+  const [loanPaymentResult, setLoanPaymentResult] = useState(null)
+
+  const [payoffPrincipal, setPayoffPrincipal] = useState('80000')
+  const [payoffRate, setPayoffRate] = useState('6.5')
+  const [payoffMonthly, setPayoffMonthly] = useState('600')
+  const [payoffResult, setPayoffResult] = useState(null)
+
+  const [savingsPrincipal, setSavingsPrincipal] = useState('5000')
+  const [savingsRate, setSavingsRate] = useState('3.2')
+  const [savingsYears, setSavingsYears] = useState('5')
+  const [savingsMonthly, setSavingsMonthly] = useState('200')
+  const [savingsResult, setSavingsResult] = useState(null)
+
   const [busy, setBusy] = useState('')
   const [error, setError] = useState(null)
 
@@ -41,6 +58,35 @@ export default function Tools() {
     if (!file) return
     setBusy('transcribing'); setError(null)
     try { setTranscript(await api.transcribe(file)) } catch (err) { setError(err.message) } finally { setBusy('') }
+  }
+
+  async function calcLoanPayment() {
+    setBusy('calculating'); setError(null)
+    try {
+      setLoanPaymentResult(await api.loanPayment({
+        principal: Number(loanPrincipal), annual_rate_percent: Number(loanRate), years: Number(loanYears),
+      }))
+    } catch (e) { setError(e.message); setLoanPaymentResult(null) } finally { setBusy('') }
+  }
+
+  async function calcLoanPayoff() {
+    setBusy('calculating'); setError(null)
+    try {
+      setPayoffResult(await api.loanPayoff({
+        principal: Number(payoffPrincipal), annual_rate_percent: Number(payoffRate),
+        monthly_payment: Number(payoffMonthly),
+      }))
+    } catch (e) { setError(e.message); setPayoffResult(null) } finally { setBusy('') }
+  }
+
+  async function calcSavingsGrowth() {
+    setBusy('calculating'); setError(null)
+    try {
+      setSavingsResult(await api.savingsGrowth({
+        principal: Number(savingsPrincipal), annual_rate_percent: Number(savingsRate),
+        years: Number(savingsYears), monthly_contribution: Number(savingsMonthly),
+      }))
+    } catch (e) { setError(e.message); setSavingsResult(null) } finally { setBusy('') }
   }
 
   return (
@@ -117,6 +163,91 @@ export default function Tools() {
             <p className="faint" style={{ margin: '.3rem 0 0' }}>
               status {transcript.status} · confidence {transcript.confidence ?? '—'} · {transcript.duration_seconds}s
             </p>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>Loan payment — fixed-rate amortization</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Plain math (see <code>app/finance.py</code>), not a model call — the exact answer for
+          the class of question a RAG lookup over product docs can't actually compute.
+        </p>
+        <div className="row">
+          <div><label>Principal</label>
+            <input type="number" value={loanPrincipal} onChange={(e) => setLoanPrincipal(e.target.value)} /></div>
+          <div><label>Annual rate %</label>
+            <input type="number" value={loanRate} onChange={(e) => setLoanRate(e.target.value)} /></div>
+          <div><label>Years</label>
+            <input type="number" value={loanYears} onChange={(e) => setLoanYears(e.target.value)} /></div>
+          <button className="btn btn-primary shrink" onClick={calcLoanPayment} disabled={!!busy}>Calculate</button>
+        </div>
+        {loanPaymentResult && (
+          <div style={{ marginTop: '.8rem' }}>
+            <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+              <span className="badge gold">{loanPaymentResult.monthly_payment} / month</span>
+              <span className="badge muted">{loanPaymentResult.months} months</span>
+              <span className="badge muted">total paid {loanPaymentResult.total_paid}</span>
+              <span className="badge muted">total interest {loanPaymentResult.total_interest}</span>
+            </div>
+            <RawJson data={loanPaymentResult} />
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>Loan payoff time — the inverse question</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          "I can pay this much a month — how long until it's gone?" Errors (422) if the payment
+          doesn't even cover the interest accruing each month.
+        </p>
+        <div className="row">
+          <div><label>Principal</label>
+            <input type="number" value={payoffPrincipal} onChange={(e) => setPayoffPrincipal(e.target.value)} /></div>
+          <div><label>Annual rate %</label>
+            <input type="number" value={payoffRate} onChange={(e) => setPayoffRate(e.target.value)} /></div>
+          <div><label>Monthly payment</label>
+            <input type="number" value={payoffMonthly} onChange={(e) => setPayoffMonthly(e.target.value)} /></div>
+          <button className="btn btn-primary shrink" onClick={calcLoanPayoff} disabled={!!busy}>Calculate</button>
+        </div>
+        {payoffResult && (
+          <div style={{ marginTop: '.8rem' }}>
+            <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+              <span className="badge gold">{payoffResult.years} years</span>
+              <span className="badge muted">{payoffResult.months} months</span>
+              <span className="badge muted">total paid {payoffResult.total_paid}</span>
+              <span className="badge muted">total interest {payoffResult.total_interest}</span>
+            </div>
+            <RawJson data={payoffResult} />
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>Savings growth — the deposit side</h3>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Compound growth of a starting deposit plus a fixed monthly contribution, compounded
+          monthly. The savings-side counterpart to the two loan calculators above.
+        </p>
+        <div className="row">
+          <div><label>Starting deposit</label>
+            <input type="number" value={savingsPrincipal} onChange={(e) => setSavingsPrincipal(e.target.value)} /></div>
+          <div><label>Annual rate %</label>
+            <input type="number" value={savingsRate} onChange={(e) => setSavingsRate(e.target.value)} /></div>
+          <div><label>Years</label>
+            <input type="number" value={savingsYears} onChange={(e) => setSavingsYears(e.target.value)} /></div>
+          <div><label>Monthly contribution</label>
+            <input type="number" value={savingsMonthly} onChange={(e) => setSavingsMonthly(e.target.value)} /></div>
+          <button className="btn btn-primary shrink" onClick={calcSavingsGrowth} disabled={!!busy}>Calculate</button>
+        </div>
+        {savingsResult && (
+          <div style={{ marginTop: '.8rem' }}>
+            <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+              <span className="badge gold">final balance {savingsResult.final_balance}</span>
+              <span className="badge muted">contributed {savingsResult.total_contributed}</span>
+              <span className="badge muted">interest earned {savingsResult.total_interest}</span>
+            </div>
+            <RawJson data={savingsResult} />
           </div>
         )}
       </div>

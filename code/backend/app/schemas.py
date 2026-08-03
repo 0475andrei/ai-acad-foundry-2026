@@ -423,6 +423,62 @@ class SuggestResponse(BaseModel):
     model: str
 
 
+# Three deterministic, dependency-free banking calculators — plain amortization/
+# compound-interest math, not model calls. The exact class of question that once
+# got a bad "no rate found" RAG answer (a fixed-rate mortgage payment, given
+# principal/rate/term) now has a real, exact answer available as a tool call
+# instead of an LLM guess.
+class LoanPaymentRequest(BaseModel):
+    model_config = {"json_schema_extra": {"examples": [{
+        "principal": 80000, "annual_rate_percent": 6.5, "years": 30,
+    }]}}
+
+    principal: float = Field(..., gt=0, description="Loan amount")
+    annual_rate_percent: float = Field(..., ge=0, le=100, description="Fixed nominal annual interest rate (%)")
+    years: float = Field(..., gt=0, le=100, description="Loan term, in years")
+
+
+class LoanPaymentResponse(BaseModel):
+    monthly_payment: float
+    months: int
+    total_paid: float
+    total_interest: float
+
+
+class LoanPayoffRequest(BaseModel):
+    model_config = {"json_schema_extra": {"examples": [{
+        "principal": 80000, "annual_rate_percent": 6.5, "monthly_payment": 600,
+    }]}}
+
+    principal: float = Field(..., gt=0, description="Loan amount")
+    annual_rate_percent: float = Field(..., ge=0, le=100, description="Fixed nominal annual interest rate (%)")
+    monthly_payment: float = Field(..., gt=0, description="What you can actually pay each month")
+
+
+class LoanPayoffResponse(BaseModel):
+    months: int
+    years: float
+    total_paid: float
+    total_interest: float
+
+
+class SavingsGrowthRequest(BaseModel):
+    model_config = {"json_schema_extra": {"examples": [{
+        "principal": 5000, "annual_rate_percent": 3.2, "years": 5, "monthly_contribution": 200,
+    }]}}
+
+    principal: float = Field(0, ge=0, description="Starting deposit")
+    annual_rate_percent: float = Field(..., ge=0, le=100, description="Fixed nominal annual interest rate (%)")
+    years: float = Field(..., gt=0, le=100, description="Savings horizon, in years")
+    monthly_contribution: float = Field(0, ge=0, description="Added at the end of every month")
+
+
+class SavingsGrowthResponse(BaseModel):
+    final_balance: float
+    total_contributed: float
+    total_interest: float
+
+
 # --- ops ----------------------------------------------------------------------
 class CollectionInfo(BaseModel):
     exists: bool

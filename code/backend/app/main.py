@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from . import chunking, feedback_store, guardrails, pii, retrieval_lang
+from . import chunking, feedback_store, finance, guardrails, pii, retrieval_lang
 from .agents import foundry_agent, local_agent
 from .agents.persona import PersonaNotFound, available_names, load_persona, list_personas, PERSONA_DIR
 from .config import settings
@@ -20,10 +20,12 @@ from .schemas import (
     AgentInfo, AgentListResponse, AskRequest, AskResponse, AzureDeployment, AzureDeployments,
     AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, FeedbackEntry,
     FeedbackListResponse, FeedbackRequest, FoundryAvailability, GuardrailReport, Health,
-    HostedAgent, IngestRequest, IngestResponse, PersonaSummary, PiiReport, ScrapeRequest,
-    ScrapeResponse, SearchHit, SearchRequest, SearchResponse, SpeakRequest, SuggestRequest,
-    SuggestResponse, TranscribeResponse, Usage, WebSearchHit, WebSearchRequest,
-    WebSearchResponse, AzureSearchQueryRequest, AzureSearchSyncRequest,
+    HostedAgent, IngestRequest, IngestResponse, LoanPayoffRequest, LoanPayoffResponse,
+    LoanPaymentRequest, LoanPaymentResponse, PersonaSummary, PiiReport, SavingsGrowthRequest,
+    SavingsGrowthResponse, ScrapeRequest, ScrapeResponse, SearchHit, SearchRequest,
+    SearchResponse, SpeakRequest, SuggestRequest, SuggestResponse, TranscribeResponse, Usage,
+    WebSearchHit, WebSearchRequest, WebSearchResponse, AzureSearchQueryRequest,
+    AzureSearchSyncRequest,
 )
 from .services import aisearch, speech, web
 from .vectorstore import DimensionMismatch, VectorStore
@@ -602,7 +604,13 @@ def suggest(req: SuggestRequest) -> SuggestResponse:
     # come back with an empty answer — silently, since that just looks like "no
     # suggestion needed". reasoning_extras() (llm.py) is what keeps output tokens
     # available — same helper local_agent.py uses for /ask.
-    extras = reasoning_extras(llm.model)
+    #
+    # Pinned to "low", not the library default ("minimal"): measured directly against
+    # this route, "minimal" too often judges a genuine Romanian typo ("credti",
+    # "doban da") as fine and replies NONE — not a token-budget failure, a judgment
+    # one. "low" catches all of them correctly and still finishes in well under 300
+    # tokens, nowhere near the "medium" blow-the-budget failure mode either.
+    extras = reasoning_extras(llm.model, override="low")
     try:
         result = llm.chat(system=_SUGGEST_SYSTEM, user=draft, temperature=0.2,
                           max_tokens=300, extras=extras)
@@ -751,3 +759,39 @@ async def transcribe(file: UploadFile = File(..., description="WAV, 16 kHz mono,
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
     return TranscribeResponse(**result)
+
+
+# --- banking calculators --------------------------------------------------------
+# Plain arithmetic (see app/finance.py) — not a model call, so no LLM cost, no
+# hallucination risk, and no rate limit tied to the LLM-backed tools above; still
+# behind _tools_limiter since it's the same "don't get hammered" concern as any
+# other route.
+@app.post("/tools/loan-payment", response_model=LoanPaymentResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
+def loan_payment(req: LoanPaymentRequest) -> LoanPaymentResponse:
+    """Fixed-rate loan monthly payment — principal, annual rate, term in years.
+    The exact calculation for the class of question ("80,000 euros, 30 years,
+    fixed rate") that a RAG lookup over product docs can't actually answer."""
+    return LoanPaymentResponse(**finance.loan_payment(
+        req.principal, req.annual_rate_percent, req.years))
+
+
+@app.post("/tools/loan-payoff", response_model=LoanPayoffResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
+def loan_payoff(req: LoanPayoffRequest) -> LoanPayoffResponse:
+    """The inverse of /tools/loan-payment: given what you can actually pay each
+    month, how long until the loan is paid off."""
+    try:
+        return LoanPayoffResponse(**finance.loan_payoff(
+            req.principal, req.annual_rate_percent, req.monthly_payment))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.post("/tools/savings-growth", response_model=SavingsGrowthResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
+def savings_growth(req: SavingsGrowthRequest) -> SavingsGrowthResponse:
+    """Compound growth of a deposit plus an optional fixed monthly contribution,
+    compounded monthly — the savings-side counterpart to the two loan tools above."""
+    return SavingsGrowthResponse(**finance.savings_growth(
+        req.principal, req.annual_rate_percent, req.years, req.monthly_contribution))
