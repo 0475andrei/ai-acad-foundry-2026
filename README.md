@@ -31,9 +31,19 @@ ai-acad-foundry-2026/
 │   │   └── ref-git.html                    ← how git works
 │   └── assignments/                        ← homework briefs (aNN.md)
 │       └── a1.md                           ← Assignment 1 · run backend, build admin UI
-├── code/                                   ← demo code shown live
-│   └── backend/                            ← RAG Teaching API (FastAPI + Qdrant, uv, docker compose;
-│                                              see its README for run & credentials guides)
+├── code/                                   ← demo code shown live, and "Libra Assist" — the
+│   │                                          production build students extend throughout the module
+│   ├── backend/                            ← RAG Teaching API (FastAPI + Qdrant, uv, docker compose);
+│   │                                          guardrails, PII redaction, rate limiting, cross-lingual
+│   │                                          retrieval, banking calculators, PDF contract extraction —
+│   │                                          see its README for the full list, run & credentials guides
+│   └── frontend/                           ← Vite + React console, two roles from one codebase: a full
+│                                              technical admin UI, and a localized "user" chat with a
+│                                              pixel-art assistant character — see its README
+├── data/                                   ← the ingested knowledge base + golden question sets
+│                                              (questions.md, questions-round2.md — real /ask output,
+│                                              nothing invented, including gaps found and fixed)
+├── mock-contracts/                         ← sample PDFs for testing /tools/contract-extract
 └── _raw_inputs/   (git-ignored)            ← private source material (WhatsApp, spreadsheet, logs)
 ```
 

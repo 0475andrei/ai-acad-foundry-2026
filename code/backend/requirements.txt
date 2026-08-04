@@ -127,6 +127,8 @@ pydantic-settings==2.14.2
     # via rag-teaching-backend
 pyjwt==2.13.0
     # via msal
+pypdf==6.14.2
+    # via rag-teaching-backend
 python-dotenv==1.2.2
     # via
     #   pydantic-settings
