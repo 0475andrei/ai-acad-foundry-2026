@@ -479,6 +479,20 @@ class SavingsGrowthResponse(BaseModel):
     total_interest: float
 
 
+# A one-shot PDF analysis, not a Qdrant document — nothing here is ingested or
+# searchable later; see app/contracts.py.
+class ContractExtractResponse(BaseModel):
+    document_type: str = Field(description='Best guess, e.g. "credit", "employment", "real estate", "other"')
+    parties: list[str] = Field(default_factory=list)
+    duration: Optional[str] = Field(None, description="The term/period, if stated")
+    amounts: list[str] = Field(default_factory=list, description="Every sum, rate, or fee that matters")
+    key_obligations: list[str] = Field(default_factory=list)
+    penalties: list[str] = Field(default_factory=list, description="Fees, penalties, or termination conditions")
+    warnings: list[str] = Field(default_factory=list, description="Anything unusual or worth a second look")
+    truncated: bool = Field(description="True if the PDF was longer than the analyzed portion")
+    chars_analyzed: int
+
+
 # --- ops ----------------------------------------------------------------------
 class CollectionInfo(BaseModel):
     exists: bool

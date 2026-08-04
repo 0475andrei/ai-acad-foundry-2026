@@ -33,6 +33,24 @@ _CNP_RE = re.compile(r"\b\d{13}\b")
 _IBAN_RE = re.compile(r"\bRO\d{2}[A-Z]{4}[A-Z0-9]{16}\b", re.I)
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 _PHONE_RE = re.compile(r"\b(?:\+4?0|0)7\d{2}[ -]?\d{3}[ -]?\d{3}\b")
+# A Romanian street address: a street-type word (str./bd./calea/...), a name,
+# then "nr. <number>" and optionally bloc/scară/etaj/apartament. Unlike CNP/card/
+# phone this has no fixed digit shape to validate against — it's a genuine
+# heuristic on wording, so it's the least reliable pattern here: it will miss
+# addresses with no "nr." (e.g. a bare "Piața Unirii") and can false-positive
+# on prose that happens to say "strada X" without meaning a home address.
+# Accepted the same way as everything else in this module — a zero-cost first
+# layer, not a claim of completeness.
+_ADDRESS_RE = re.compile(
+    r"\b(?:str\.?|strada|bd\.?|bulevardul|alee(?:a)?|calea|[sș]os\.?|[sș]oseaua|pia[tț][aă])\s+"
+    r"[A-ZĂÂÎȘȚa-zăâîșț0-9][\wăâîșțĂÂÎȘȚ.\-]*(?:\s+[A-ZĂÂÎȘȚa-zăâîșț0-9][\wăâîșțĂÂÎȘȚ.\-]*){0,4}"
+    r",?\s*nr\.?\s*\d+[a-zA-Z]?"
+    r"(?:,?\s*(?:bl\.?|bloc)\s*[\w-]+)?"
+    r"(?:,?\s*(?:sc\.?|scara)\s*[\w-]+)?"
+    r"(?:,?\s*(?:et\.?|etaj)\s*[\w-]+)?"
+    r"(?:,?\s*(?:ap\.?|apartament)\s*[\w-]+)?",
+    re.I,
+)
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -91,5 +109,8 @@ def scan_and_redact(text: str) -> tuple[str, list[str]]:
     if _PHONE_RE.search(text):
         found.append("phone")
         text = _PHONE_RE.sub("[REDACTED-PHONE]", text)
+    if _ADDRESS_RE.search(text):
+        found.append("address")
+        text = _ADDRESS_RE.sub("[REDACTED-ADDRESS]", text)
 
     return text, found

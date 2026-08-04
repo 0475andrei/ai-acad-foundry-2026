@@ -38,6 +38,12 @@ function uiStrings(isAdmin) {
     placeholder: 'Ask Libra Assist…  (Enter to send, Shift+Enter for a new line)',
     send: 'Send',
     personaFallback: 'Andrei’s Product Specialist',
+    addContract: '📄 Analyze a contract (PDF)', analyzingContract: 'Reading the contract…',
+    contractType: 'document type', contractParties: 'parties', contractDuration: 'duration',
+    contractAmounts: 'amounts & fees', contractObligations: 'key obligations',
+    contractPenalties: 'penalties / termination', contractWarnings: 'worth a second look',
+    contractTruncated: (n) => `Only the first ${n.toLocaleString()} characters were analyzed — the file was longer.`,
+    contractNotSaved: 'Analyzed once, not saved — this contract was not added to the knowledge base.',
   } : {
     clear: 'golește', newChatTitle: 'Conversație nouă',
     welcomeBody: 'Pune o întrebare despre documentele încărcate. Răspunsul e tradus automat, '
@@ -59,6 +65,12 @@ function uiStrings(isAdmin) {
     placeholder: 'Întreabă Libra Assist…  (Enter pentru a trimite, Shift+Enter pentru rând nou)',
     send: 'Trimite',
     personaFallback: 'Specialistul Andrei în produse',
+    addContract: '📄 Analizează un contract (PDF)', analyzingContract: 'LIviu BRAdu citește contractul…',
+    contractType: 'tip document', contractParties: 'părți implicate', contractDuration: 'durată',
+    contractAmounts: 'sume și taxe', contractObligations: 'obligații principale',
+    contractPenalties: 'penalități / reziliere', contractWarnings: 'de reținut / atenție',
+    contractTruncated: (n) => `S-au analizat doar primele ${n.toLocaleString('ro-RO')} caractere — fișierul era mai lung.`,
+    contractNotSaved: 'Analizat o singură dată, nu s-a salvat — acest contract nu a fost adăugat în baza de cunoștințe.',
   }
 }
 
@@ -178,6 +190,27 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
     } finally { setBusy(false) }
   }
 
+  // Contract PDF upload — a one-shot analysis, not RAG: the result is shown as its
+  // own message so it stays in this conversation's history like anything else, but
+  // it's a 'contract' role, not 'user'/'bot', so the history filter in send() (above)
+  // never feeds it back to the model. Nothing is sent to /ingest — see app/contracts.py.
+  const contractInputRef = useRef(null)
+  const [contractBusy, setContractBusy] = useState(false)
+
+  async function handleContractFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''   // same file picked twice in a row must still fire onChange
+    if (!file) return
+    setContractBusy(true); setError(null)
+    try {
+      const data = await api.contractExtract(file)
+      setMessages((m) => [...m, { role: 'contract', fileName: file.name, data }])
+    } catch (err) {
+      setMessages((m) => [...m, { role: 'err', text: err.message }])
+      setError(err.message)
+    } finally { setContractBusy(false) }
+  }
+
   const all = [...agents, ...hostedOnly]
   const current = all.find((a) => a.name === agent)
 
@@ -289,6 +322,40 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
         {messages.map((m, i) => {
           if (m.role === 'user') return <div className="msg user" key={i}>{m.text}</div>
           if (m.role === 'err') return <div className="msg err" key={i}><strong>{t.requestFailed}</strong> {m.text}</div>
+          if (m.role === 'contract') {
+            const c = m.data
+            const rows = [
+              [t.contractType, c.document_type],
+              [t.contractParties, c.parties],
+              [t.contractDuration, c.duration],
+              [t.contractAmounts, c.amounts],
+              [t.contractObligations, c.key_obligations],
+              [t.contractPenalties, c.penalties],
+              [t.contractWarnings, c.warnings],
+            ]
+            return (
+              <div className="msg bot" key={i}>
+                <strong>📄 {m.fileName}</strong>
+                {rows.map(([label, value]) => {
+                  if (!value || (Array.isArray(value) && value.length === 0)) return null
+                  return (
+                    <div key={label} style={{ marginTop: '.6rem' }}>
+                      <div className="muted" style={{ fontSize: '.78rem', textTransform: 'uppercase', letterSpacing: '.03em' }}>{label}</div>
+                      {Array.isArray(value)
+                        ? <ul style={{ margin: '.25rem 0 0', paddingLeft: '1.2rem' }}>
+                            {value.map((v, j) => <li key={j}>{v}</li>)}
+                          </ul>
+                        : <div>{value}</div>}
+                    </div>
+                  )
+                })}
+                <div className="msg-meta">
+                  <span className="badge muted">{t.contractNotSaved}</span>
+                  {c.truncated && <span className="badge gold">{t.contractTruncated(c.chars_analyzed)}</span>}
+                </div>
+              </div>
+            )
+          }
           const d = m.data
           const guardrailHit = describeGuardrails(d.guardrails)
           return (
@@ -347,6 +414,17 @@ export default function Chat({ agents, hostedOnly = [], foundry, isAdmin = true,
           indicator moves here — a small status line above the composer instead of
           taking over the middle of the screen on every request. */}
       {!isAdmin && tellerPhase && <LibraTeller phase={tellerPhase} compact />}
+      {!isAdmin && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', marginBottom: '.5rem' }}>
+          <input type="file" accept="application/pdf" ref={contractInputRef}
+                 onChange={handleContractFile} style={{ display: 'none' }} />
+          <button className="btn btn-outline btn-sm" disabled={contractBusy}
+                  onClick={() => contractInputRef.current?.click()}>
+            {t.addContract}
+          </button>
+          {contractBusy && <span className="muted" style={{ fontSize: '.85rem' }}><span className="spin" /> {t.analyzingContract}</span>}
+        </div>
+      )}
       <div className="composer">
         {suggestion && (
           <div className="suggest-popup">

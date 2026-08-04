@@ -42,6 +42,26 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
         r"\bjailbreak\b|\bdeveloper mode\b|\bdo anything now\b|no (restrictions|filters) (apply|on you)", re.I)),
     ("new-instructions", re.compile(r"\b(new|updated) instructions\s*:", re.I)),
     ("prompt-leak-request", re.compile(r"(top|start) of (this|the) (conversation|prompt|chat)", re.I)),
+
+    # Romanian mirrors of the above shapes — added after golden-set question D4
+    # (questions-round2.md) found "Ignoră toate instrucțiunile anterioare..." matched
+    # none of the English-only patterns. Diacritics made optional ([ăa], [țt], [șs])
+    # since users commonly type without them.
+    ("override-instructions", re.compile(
+        r"ignor[ăa]\s*(toate|orice)?\s*(the\s+)?(instruc[țt]iunile|regulile|promptul)\s*"
+        r"(anterioare|precedente|de mai sus)?", re.I)),
+    ("override-instructions", re.compile(
+        r"nu\s+(ține|tine)\s+cont\s+de\s+(instruc[țt]iunile|regulile|promptul)\s*(anterioare|precedente)?", re.I)),
+    ("override-instructions", re.compile(r"uit[ăa]\s*(toate|orice)?\s*(instruc[țt]iunile|regulile)", re.I)),
+    ("role-override", re.compile(
+        r"\bacum\s+e[șs]ti\b|\bde\s*acum\s*(înainte|inainte)?\s*e[șs]ti\b|"
+        r"\bcomport[ăa]-te\s+ca\b|\bac[țt]ionezi\s+ca\b", re.I)),
+    ("reveal-system-prompt", re.compile(
+        r"(spune-mi|arat[ăa]-mi|dezv[ăa]luie|repet[ăa])\b.{0,25}"
+        r"(promptul|instruc[țt]iunile|configura[țt]ia)\s+(t[ăa]u|tale|ta)", re.I)),
+    ("reveal-system-prompt", re.compile(r"(promptul|instruc[țt]iunile)\s+(t[ăa]u|tale)\s+de\s+sistem", re.I)),
+    ("jailbreak-marker", re.compile(r"\bf[ăa]r[ăa]\s+restric[țt]ii\b|\bmod\s+dezvoltator\b", re.I)),
+    ("new-instructions", re.compile(r"\binstruc[țt]iuni\s+(noi|actualizate)\s*:", re.I)),
 ]
 
 

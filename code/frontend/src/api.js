@@ -58,4 +58,14 @@ export const api = {
     }
     return response.json()
   },
+  contractExtract: async (file) => {
+    const form = new FormData()
+    form.append('file', file)
+    const response = await fetch('/tools/contract-extract', { method: 'POST', body: form })
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      throw new Error(data.detail || `HTTP ${response.status}`)
+    }
+    return response.json()
+  },
 }

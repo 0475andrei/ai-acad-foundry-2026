@@ -7,10 +7,12 @@
     "When more than one product applies, present a short comparison (as a table or a tight list) before giving a recommendation.",
     "Recommend at most one option explicitly, and say why it fits better than the alternatives.",
     "Keep the whole answer under 150 words unless the customer asks for more detail.",
-    "Never invent numbers that are not in the retrieved context; if a comparison point is missing, say which one and leave it out rather than estimating it."
+    "Never invent numbers that are not in the retrieved context; if a comparison point is missing, say which one and leave it out rather than estimating it.",
+    "The currency an amount was quoted in is never, by itself, a reason to refuse a payment calculation — the arithmetic doesn't care whether the principal is EUR or RON, so do not cite a missing exchange rate as the blocker.",
+    "Before answering a monthly-payment question, compare the requested term to any fixed-rate period stated in the documents. If the request runs longer than the fixed period (e.g. a 30-year payment on a mortgage fixed only for the first 5 years), say plainly that the rate is not fixed for the full period and the remainder depends on a variable market rate (e.g. ROBOR) that isn't in the documents — that is the real reason a single monthly figure can't be given for the full term, and the one to state."
   ],
   "temperature": 0.3,
-  "max_tokens": 2000,
+  "max_tokens": 4000,
   "require_citations": true,
   "refuse_when_unsupported": true,
   "reasoning_effort": "low",

@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
-from . import chunking, feedback_store, finance, guardrails, pii, retrieval_lang
+from . import chunking, contracts, feedback_store, finance, guardrails, pii, retrieval_lang
 from .agents import foundry_agent, local_agent
 from .agents.persona import PersonaNotFound, available_names, load_persona, list_personas, PERSONA_DIR
 from .config import settings
@@ -18,9 +18,9 @@ from .llm import get_llm, reasoning_extras
 from .ratelimit import RateLimiter, rate_limit_dependency
 from .schemas import (
     AgentInfo, AgentListResponse, AskRequest, AskResponse, AzureDeployment, AzureDeployments,
-    AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, FeedbackEntry,
-    FeedbackListResponse, FeedbackRequest, FoundryAvailability, GuardrailReport, Health,
-    HostedAgent, IngestRequest, IngestResponse, LoanPayoffRequest, LoanPayoffResponse,
+    AzureStatus, ChunkInfo, ChunkRequest, ChunkResponse, CollectionInfo, ContractExtractResponse,
+    FeedbackEntry, FeedbackListResponse, FeedbackRequest, FoundryAvailability, GuardrailReport,
+    Health, HostedAgent, IngestRequest, IngestResponse, LoanPayoffRequest, LoanPayoffResponse,
     LoanPaymentRequest, LoanPaymentResponse, PersonaSummary, PiiReport, SavingsGrowthRequest,
     SavingsGrowthResponse, ScrapeRequest, ScrapeResponse, SearchHit, SearchRequest,
     SearchResponse, SpeakRequest, SuggestRequest, SuggestResponse, TranscribeResponse, Usage,
@@ -795,3 +795,36 @@ def savings_growth(req: SavingsGrowthRequest) -> SavingsGrowthResponse:
     compounded monthly — the savings-side counterpart to the two loan tools above."""
     return SavingsGrowthResponse(**finance.savings_growth(
         req.principal, req.annual_rate_percent, req.years, req.monthly_contribution))
+
+
+# --- contract extraction ---------------------------------------------------------
+@app.post("/tools/contract-extract", response_model=ContractExtractResponse, tags=["6 · tools"],
+         dependencies=[Depends(rate_limit_dependency(_tools_limiter))])
+async def contract_extract(file: UploadFile = File(..., description="A contract as PDF — credit, employment, real estate, or anything else")):
+    """Pull the practically important facts out of a dense, formal contract: parties,
+    duration, amounts, obligations, penalties, and anything worth a second look. A
+    one-shot read — the file's text is sent to the model and the result returned;
+    nothing is written to Qdrant or the knowledge base, unlike /ingest."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="The uploaded file is empty.")
+    try:
+        text, truncated = contracts.extract_text(data)
+    except contracts.PdfUnreadable as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="No extractable text found in this PDF — "
+                             "it may be a scanned image with no text layer (OCR isn't wired up here).")
+
+    llm = get_llm()
+    extras = reasoning_extras(llm.model, override="low")
+    try:
+        result = llm.chat(system=contracts.SYSTEM_PROMPT, user=text, temperature=0.1,
+                          max_tokens=1500, extras=extras)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Extraction failed: {e}")
+    try:
+        fields = contracts.parse_response(result.text)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return ContractExtractResponse(**fields, truncated=truncated, chars_analyzed=len(text))
